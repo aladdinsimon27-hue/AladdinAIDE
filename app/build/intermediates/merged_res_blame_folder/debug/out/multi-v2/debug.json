@@ -1,0 +1,61 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.aladdin.ide.app-merged_res-4:/values_values.arsc.flat",
+            "map": [
+                {
+                    "source": "/data/data/com.termux/files/home/AladdinIDE/app/src/main/res/values/strings.xml",
+                    "from": {
+                        "startLines": "3,4",
+                        "startColumns": "4,4",
+                        "startOffsets": "56,104",
+                        "endColumns": "47,52",
+                        "endOffsets": "99,152"
+                    },
+                    "to": {
+                        "startLines": "2,3",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,103",
+                        "endColumns": "47,52",
+                        "endOffsets": "98,151"
+                    }
+                },
+                {
+                    "source": "/data/data/com.termux/files/home/AladdinIDE/app/src/main/res/values/styles.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "3",
+                        "endColumns": "9",
+                        "endOffsets": "129"
+                    },
+                    "to": {
+                        "startLines": "4",
+                        "startColumns": "4",
+                        "startOffsets": "156",
+                        "endLines": "5",
+                        "endColumns": "9",
+                        "endOffsets": "230"
+                    }
+                }
+            ]
+        },
+        {
+            "outputFile": "com.aladdin.ide.app-merged_res-4:/values-v21_values-v21.arsc.flat",
+            "map": [
+                {
+                    "source": "/data/data/com.termux/files/home/AladdinIDE/app/src/main/res/values-v21/styles.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endLines": "3",
+                        "endColumns": "9",
+                        "endOffsets": "133"
+                    }
+                }
+            ]
+        }
+    ]
+}

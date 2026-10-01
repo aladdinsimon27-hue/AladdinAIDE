@@ -1,0 +1,7 @@
+com.aladdin.ide.app-pngs-0 /data/data/com.termux/files/home/AladdinIDE/app/build/generated/res/pngs/debug
+com.aladdin.ide.app-resValues-1 /data/data/com.termux/files/home/AladdinIDE/app/build/generated/res/resValues/debug
+com.aladdin.ide.app-packageDebugResources-2 /data/data/com.termux/files/home/AladdinIDE/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
+com.aladdin.ide.app-packageDebugResources-3 /data/data/com.termux/files/home/AladdinIDE/app/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
+com.aladdin.ide.app-merged_res-4 /data/data/com.termux/files/home/AladdinIDE/app/build/intermediates/merged_res/debug
+com.aladdin.ide.app-debug-5 /data/data/com.termux/files/home/AladdinIDE/app/src/debug/res
+com.aladdin.ide.app-main-6 /data/data/com.termux/files/home/AladdinIDE/app/src/main/res

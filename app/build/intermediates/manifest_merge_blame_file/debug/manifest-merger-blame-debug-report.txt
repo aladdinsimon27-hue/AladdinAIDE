@@ -1,0 +1,52 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.aladdin.ide"
+4    android:versionCode="1"
+5    android:versionName="1.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="24"
+9        android:targetSdkVersion="34" />
+10
+11    <!-- Required for Android 11+ to query Termux -->
+12    <queries>
+12-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:5:5-7:15
+13        <package android:name="com.termux" />
+13-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:6:9-46
+13-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:6:18-43
+14    </queries>
+15
+16    <application
+16-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:9:5-23:19
+17        android:allowBackup="true"
+17-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:10:9-35
+18        android:debuggable="true"
+19        android:extractNativeLibs="false"
+20        android:icon="@android:drawable/sym_def_app_icon"
+20-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:11:9-58
+21        android:label="@string/app_name"
+21-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:12:9-41
+22        android:theme="@style/AppTheme" >
+22-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:13:9-40
+23        <activity
+23-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:14:9-22:20
+24            android:name="com.aladdin.ide.MainActivity"
+24-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:15:13-41
+25            android:exported="true"
+25-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:16:13-36
+26            android:windowSoftInputMode="adjustResize" >
+26-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:17:13-55
+27            <intent-filter>
+27-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:18:13-21:29
+28                <action android:name="android.intent.action.MAIN" />
+28-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:19:17-69
+28-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:19:25-66
+29
+30                <category android:name="android.intent.category.LAUNCHER" />
+30-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:20:17-77
+30-->/data/data/com.termux/files/home/AladdinIDE/app/src/main/AndroidManifest.xml:20:27-74
+31            </intent-filter>
+32        </activity>
+33    </application>
+34
+35</manifest>

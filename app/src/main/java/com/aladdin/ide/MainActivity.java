@@ -455,7 +455,13 @@ public class MainActivity extends Activity {
                         dlConn.setRequestProperty("Authorization", "token " + githubToken);
                         
                         InputStream in = dlConn.getInputStream();
-                        FileOutputStream out = new FileOutputStream(new File(Environment.getExternalStorageDirectory(), "AladdinIDE-APK.zip"));
+                        
+                        // FIX: Save to app-private external directory to avoid Android 10+ permission errors
+                        File downloadDir = getExternalFilesDir(null);
+                        if (downloadDir != null && !downloadDir.exists()) downloadDir.mkdirs();
+                        File apkFile = new File(downloadDir, "AladdinIDE-APK.zip");
+                        
+                        FileOutputStream out = new FileOutputStream(apkFile);
                         
                         byte[] buffer = new byte[4096];
                         int len;
@@ -465,8 +471,9 @@ public class MainActivity extends Activity {
                         out.close();
                         in.close();
 
-                        logToConsole("✅ APK Downloaded to Downloads folder!");
-                        logToConsole("Open your File Manager to install it.");
+                        logToConsole("✅ APK Downloaded!");
+                        logToConsole("Location: " + apkFile.getAbsolutePath());
+                        logToConsole("Open File Manager, go to Android/data/com.aladdin.ide/files/ to install it.");
                     }
                 } catch (Exception e) {
                     logToConsole("❌ Download error: " + e.getMessage());

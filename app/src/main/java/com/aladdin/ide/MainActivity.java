@@ -4,15 +4,16 @@ import android.app.*;
 import android.os.*;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.content.*;
 import android.text.*;
 import android.text.style.ForegroundColorSpan;
 import android.view.*;
 import android.widget.*;
 import java.io.*;
+import java.net.*;
 import java.util.*;
 import java.util.regex.*;
+import org.json.*;
 
 public class MainActivity extends Activity {
 
@@ -37,6 +38,11 @@ public class MainActivity extends Activity {
     ArrayList<File> openFiles = new ArrayList<File>();
     HashMap<String, String> unsavedChanges = new HashMap<String, String>();
 
+    // GITHUB SETTINGS
+    String githubToken = "";
+    String githubUser = "";
+    String githubRepo = "";
+
     // VS CODE DARK THEME COLORS
     int BG = Color.parseColor("#1E1E1E");
     int SIDEBAR_BG = Color.parseColor("#252526");
@@ -51,6 +57,12 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         projectsDir = new File(getFilesDir(), "projects");
         if (!projectsDir.exists()) projectsDir.mkdirs();
+        
+        SharedPreferences prefs = getSharedPreferences("AladdinPrefs", MODE_PRIVATE);
+        githubToken = prefs.getString("token", "");
+        githubUser = prefs.getString("user", "");
+        githubRepo = prefs.getString("repo", "");
+        
         buildIDE();
     }
 
@@ -79,7 +91,6 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);
 
-        // --- TOP BAR ---
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setBackgroundColor(SIDEBAR_BG);
@@ -90,8 +101,11 @@ public class MainActivity extends Activity {
         title.setTextColor(ACCENT);
         top.addView(title, new LinearLayout.LayoutParams(0, 60, 1));
 
-        Button newProject = button("+ New Project");
-        top.addView(newProject, new LinearLayout.LayoutParams(120, 60));
+        Button settingsBtn = button("⚙");
+        top.addView(settingsBtn, new LinearLayout.LayoutParams(60, 60));
+
+        Button newProject = button("+ New");
+        top.addView(newProject, new LinearLayout.LayoutParams(100, 60));
 
         Button build = button("▶ Run");
         build.setTextColor(ACCENT);
@@ -99,11 +113,9 @@ public class MainActivity extends Activity {
 
         root.addView(top);
 
-        // --- MAIN AREA (SIDEBAR + EDITOR) ---
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(LinearLayout.HORIZONTAL);
 
-        // SIDEBAR
         sidebar = new LinearLayout(this);
         sidebar.setOrientation(LinearLayout.VERTICAL);
         sidebar.setBackgroundColor(SIDEBAR_BG);
@@ -117,11 +129,9 @@ public class MainActivity extends Activity {
         sideScroll.addView(sidebar);
         main.addView(sideScroll, new LinearLayout.LayoutParams(200, LinearLayout.LayoutParams.MATCH_PARENT));
 
-        // EDITOR AREA
         editorArea = new LinearLayout(this);
         editorArea.setOrientation(LinearLayout.VERTICAL);
 
-        // Tab Bar
         HorizontalScrollView tabScroll = new HorizontalScrollView(this);
         tabScroll.setBackgroundColor(PANEL_BG);
         tabContainer = new LinearLayout(this);
@@ -130,7 +140,6 @@ public class MainActivity extends Activity {
         editorArea.addView(tabScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 50));
 
-        // Welcome Screen
         welcomeScreen = new TextView(this);
         welcomeScreen.setText("No file opened\n\nOpen a file from the explorer\nor create a new project.");
         welcomeScreen.setTextColor(TEXT_DIM);
@@ -140,7 +149,6 @@ public class MainActivity extends Activity {
         editorArea.addView(welcomeScreen, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
 
-        // Editor Container (Line numbers + Code)
         LinearLayout editorContainer = new LinearLayout(this);
         editorContainer.setOrientation(LinearLayout.HORIZONTAL);
         editorContainer.setVisibility(View.GONE);
@@ -208,7 +216,6 @@ public class MainActivity extends Activity {
         root.addView(main, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
-        // --- CONSOLE PANEL ---
         consolePanel = new LinearLayout(this);
         consolePanel.setOrientation(LinearLayout.VERTICAL);
         consolePanel.setBackgroundColor(Color.BLACK);
@@ -231,7 +238,6 @@ public class MainActivity extends Activity {
 
         root.addView(consolePanel);
 
-        // --- BOTTOM BAR ---
         LinearLayout bottom = new LinearLayout(this);
         bottom.setBackgroundColor(ACCENT);
         bottom.setElevation(8);
@@ -252,6 +258,11 @@ public class MainActivity extends Activity {
 
         setContentView(root);
         refreshProjects();
+
+        settingsBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) { showSettingsDialog(); }
+        });
 
         newProject.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -280,10 +291,188 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void showSettingsDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(20, 20, 20, 20);
+
+        final EditText userInput = new EditText(this);
+        userInput.setHint("GitHub Username");
+        userInput.setText(githubUser);
+        layout.addView(userInput);
+
+        final EditText repoInput = new EditText(this);
+        repoInput.setHint("Repository Name (e.g. AladdinAIDE)");
+        repoInput.setText(githubRepo);
+        layout.addView(repoInput);
+
+        final EditText tokenInput = new EditText(this);
+        tokenInput.setHint("Personal Access Token");
+        tokenInput.setText(githubToken);
+        layout.addView(tokenInput);
+
+        new AlertDialog.Builder(this)
+                .setTitle("GitHub Settings")
+                .setView(layout)
+                .setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        githubUser = userInput.getText().toString().trim();
+                        githubRepo = repoInput.getText().toString().trim();
+                        githubToken = tokenInput.getText().toString().trim();
+                        
+                        SharedPreferences prefs = getSharedPreferences("AladdinPrefs", MODE_PRIVATE);
+                        prefs.edit().putString("user", githubUser).putString("repo", githubRepo).putString("token", githubToken).apply();
+                        Toast.makeText(MainActivity.this, "Settings Saved", Toast.LENGTH_SHORT).show();
+                    }
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void logToConsole(String message) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                consoleOutput.append(message + "\n");
+            }
+        });
+    }
+
     private void triggerCloudBuild() {
-        Toast.makeText(this, "Build triggered! Check console.", Toast.LENGTH_SHORT).show();
+        if (githubToken.isEmpty() || githubUser.isEmpty() || githubRepo.isEmpty()) {
+            Toast.makeText(this, "Please set GitHub settings first!", Toast.LENGTH_LONG).show();
+            showSettingsDialog();
+            return;
+        }
+
         consolePanel.setVisibility(View.VISIBLE);
-        consoleOutput.setText("🚀 Starting build...\n(This is a placeholder. Paste your GitHub build logic here!)");
+        consoleOutput.setText("");
+        logToConsole("🚀 Initializing Cloud Build...");
+        logToConsole("Repo: " + githubUser + "/" + githubRepo);
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL url = new URL("https://api.github.com/repos/" + githubUser + "/" + githubRepo + "/actions/workflows/build.yml/dispatches");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Authorization", "token " + githubToken);
+                    conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+                    conn.setDoOutput(true);
+
+                    String jsonBody = "{\"ref\":\"main\"}";
+                    OutputStream os = conn.getOutputStream();
+                    os.write(jsonBody.getBytes("UTF-8"));
+                    os.close();
+
+                    int responseCode = conn.getResponseCode();
+                    if (responseCode == 204) {
+                        logToConsole("✅ Build triggered successfully!");
+                        logToConsole("⏳ Waiting for GitHub to start the build...");
+                        Thread.sleep(15000); 
+                        checkBuildStatus();
+                    } else {
+                        logToConsole("❌ Failed to trigger. Code: " + responseCode);
+                    }
+                } catch (Exception e) {
+                    logToConsole("❌ Error: " + e.getMessage());
+                }
+            }
+        }).start();
+    }
+
+    private void checkBuildStatus() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    boolean finished = false;
+                    while (!finished) {
+                        URL url = new URL("https://api.github.com/repos/" + githubUser + "/" + githubRepo + "/actions/runs?per_page=1");
+                        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                        conn.setRequestProperty("Authorization", "token " + githubToken);
+                        conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+
+                        BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                        StringBuilder response = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) response.append(line);
+                        reader.close();
+
+                        JSONObject json = new JSONObject(response.toString());
+                        JSONArray runs = json.getJSONArray("workflow_runs");
+                        if (runs.length() > 0) {
+                            JSONObject latestRun = runs.getJSONObject(0);
+                            String status = latestRun.getString("status");
+                            String conclusion = latestRun.optString("conclusion", "pending");
+
+                            logToConsole("Status: " + status + " | Result: " + conclusion);
+
+                            if (status.equals("completed")) {
+                                finished = true;
+                                if (conclusion.equals("success")) {
+                                    logToConsole("🎉 BUILD SUCCESSFUL!");
+                                    logToConsole("Downloading APK...");
+                                    downloadArtifact(latestRun.getLong("id"));
+                                } else {
+                                    logToConsole("❌ BUILD FAILED. Check GitHub for logs.");
+                                }
+                            }
+                        }
+                        Thread.sleep(10000); 
+                    }
+                } catch (Exception e) {
+                    logToConsole("❌ Error checking status: " + e.getMessage());
+                }
+            }
+        }).start();
+    }
+
+    private void downloadArtifact(long runId) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL url = new URL("https://api.github.com/repos/" + githubUser + "/" + githubRepo + "/actions/runs/" + runId + "/artifacts");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestProperty("Authorization", "token " + githubToken);
+                    conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    StringBuilder response = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) response.append(line);
+                    reader.close();
+
+                    JSONObject json = new JSONObject(response.toString());
+                    JSONArray artifacts = json.getJSONArray("artifacts");
+                    if (artifacts.length() > 0) {
+                        String downloadUrl = artifacts.getJSONObject(0).getString("archive_download_url");
+                        logToConsole("Downloading from: " + downloadUrl);
+                        
+                        URL dlUrl = new URL(downloadUrl);
+                        HttpURLConnection dlConn = (HttpURLConnection) dlUrl.openConnection();
+                        dlConn.setRequestProperty("Authorization", "token " + githubToken);
+                        
+                        InputStream in = dlConn.getInputStream();
+                        FileOutputStream out = new FileOutputStream(new File(Environment.getExternalStorageDirectory(), "AladdinIDE-APK.zip"));
+                        
+                        byte[] buffer = new byte[4096];
+                        int len;
+                        while ((len = in.read(buffer)) != -1) {
+                            out.write(buffer, 0, len);
+                        }
+                        out.close();
+                        in.close();
+
+                        logToConsole("✅ APK Downloaded to Downloads folder!");
+                        logToConsole("Open your File Manager to install it.");
+                    }
+                } catch (Exception e) {
+                    logToConsole("❌ Download error: " + e.getMessage());
+                }
+            }
+        }).start();
     }
 
     private void updateLineNumbers(String text) {

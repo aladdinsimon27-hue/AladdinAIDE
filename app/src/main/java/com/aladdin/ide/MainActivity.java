@@ -485,7 +485,7 @@ public class MainActivity extends Activity {
         else if (action.equals("Save All")) saveAll();
         else if (action.equals("Close File")) closeCurrentFile();
         else if (action.equals("Find & Replace")) showFindReplace();
-        else if (action.equals("Insert Snippet")) showSnippets();
+        else if (action.equals("Insert Snippet")) selectActivity(3);
         else if (action.equals("Toggle Zen Mode")) toggleZen();
         else if (action.equals("Toggle Minimap")) {
             minimapOn = !minimapOn;

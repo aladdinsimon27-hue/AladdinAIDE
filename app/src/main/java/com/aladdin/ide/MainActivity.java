@@ -23,15 +23,14 @@ public class MainActivity extends Activity {
 
     // CORE
     LinearLayout root, activityBar, sidebar, sidebarContent, editorArea;
-    LinearLayout tabContainer, breadcrumbBar, consolePanel, mainRow, editorContainer;
+    LinearLayout tabContainer, breadcrumbBar, consolePanel, mainRow;
     ScrollView editorScroll, sidebarScroll;
     EditText codeEditor;
     TextView lineNumbers, welcomeScreen, breadcrumbText, minimap;
-    TextView statusLeft, statusRight;
+    TextView statusLeft, statusRight, statusFile, statusLang;
     TextView tabProblems, tabOutput, tabTerminal, tabDebug, consoleOutput;
-    int activeBottomTab = 2;
-    int activeActivity = 0;
-    boolean zenMode = false;
+    int activeBottomTab = 2, activeActivity = 0;
+    boolean zenMode = false, searchCase = false;
 
     // STATE
     File projectsDir, currentProject, currentFile;
@@ -42,15 +41,28 @@ public class MainActivity extends Activity {
     ArrayList<File> collapsedFolders = new ArrayList<File>();
     HashMap<String, String> unsavedChanges = new HashMap<String, String>();
 
+    // UNDO STACK
+    ArrayList<String> undoStack = new ArrayList<String>();
+    ArrayList<Integer> undoPos = new ArrayList<Integer>();
+    ArrayList<String> redoStack = new ArrayList<String>();
+    ArrayList<Integer> redoPos = new ArrayList<Integer>();
+    String lastText = "";
+    boolean recordingUndo = true;
+    long lastEditTime = 0;
+
+    // AUTOSAVE
+    Handler autoSaveHandler = new Handler();
+    Runnable autoSaveRunnable;
+
     // SETTINGS
     String githubToken = "", githubUser = "", githubRepo = "";
     int fontSize = 13;
     boolean wordWrap = true, autoClose = true, lineNumbersOn = true, minimapOn = true;
     String currentTheme = "dark";
 
-    // THEME COLORS (mutable for theme switching)
+    // THEME COLORS
     int BG, SIDEBAR_BG, ACTIVITY_BG, PANEL_BG, TAB_INACTIVE, ACCENT, ACCENT_LIGHT;
-    int TEXT, TEXT_BRIGHT, TEXT_DIM, GREEN, ORANGE, BLUE, COMMENT, YELLOW, PINK, NUMBER_CLR;
+    int TEXT, TEXT_BRIGHT, TEXT_DIM, GREEN, ORANGE, BLUE, COMMENT, YELLOW, NUMBER_CLR;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -69,53 +81,78 @@ public class MainActivity extends Activity {
         currentTheme = p.getString("theme", "dark");
         applyTheme(currentTheme);
         buildUI();
+        startAutoSave();
+    }
+
+    void startAutoSave() {
+        autoSaveRunnable = new Runnable() {
+            @Override public void run() {
+                silentAutoSave();
+                autoSaveHandler.postDelayed(this, 30000);
+            }
+        };
+        autoSaveHandler.postDelayed(autoSaveRunnable, 30000);
+    }
+
+    void silentAutoSave() {
+        if (currentFile != null && dirtyFiles.contains(currentFile)) {
+            try {
+                writeFile(currentFile, codeEditor.getText().toString());
+                unsavedChanges.remove(currentFile.getAbsolutePath());
+                dirtyFiles.remove(currentFile);
+                addTab(currentFile);
+                statusFile.setText("  ⑂ auto-saved");
+            } catch (Exception e) {}
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        autoSaveHandler.removeCallbacks(autoSaveRunnable);
+        super.onDestroy();
     }
 
     void applyTheme(String theme) {
         if (theme.equals("dracula")) {
-            BG = Color.parseColor("#282A36"); SIDEBAR_BG = Color.parseColor("#21222C");
-            ACTIVITY_BG = Color.parseColor("#191A21"); PANEL_BG = Color.parseColor("#343746");
-            TAB_INACTIVE = Color.parseColor("#21222C"); ACCENT = Color.parseColor("#BD93F9");
-            ACCENT_LIGHT = Color.parseColor("#FF79C6"); TEXT = Color.parseColor("#F8F8F2");
-            TEXT_BRIGHT = Color.parseColor("#FFFFFF"); TEXT_DIM = Color.parseColor("#6272A4");
-            GREEN = Color.parseColor("#50FA7B"); ORANGE = Color.parseColor("#FFB86C");
-            BLUE = Color.parseColor("#8BE9FD"); COMMENT = Color.parseColor("#6272A4");
-            YELLOW = Color.parseColor("#F1FA8C"); PINK = Color.parseColor("#FF79C6");
-            NUMBER_CLR = Color.parseColor("#BD93F9");
+            BG=Color.parseColor("#282A36"); SIDEBAR_BG=Color.parseColor("#21222C");
+            ACTIVITY_BG=Color.parseColor("#191A21"); PANEL_BG=Color.parseColor("#343746");
+            TAB_INACTIVE=Color.parseColor("#21222C"); ACCENT=Color.parseColor("#BD93F9");
+            ACCENT_LIGHT=Color.parseColor("#FF79C6"); TEXT=Color.parseColor("#F8F8F2");
+            TEXT_BRIGHT=Color.parseColor("#FFFFFF"); TEXT_DIM=Color.parseColor("#6272A4");
+            GREEN=Color.parseColor("#50FA7B"); ORANGE=Color.parseColor("#FFB86C");
+            BLUE=Color.parseColor("#8BE9FD"); COMMENT=Color.parseColor("#6272A4");
+            YELLOW=Color.parseColor("#F1FA8C"); NUMBER_CLR=Color.parseColor("#BD93F9");
         } else if (theme.equals("monokai")) {
-            BG = Color.parseColor("#272822"); SIDEBAR_BG = Color.parseColor("#1E1F1C");
-            ACTIVITY_BG = Color.parseColor("#1E1F1C"); PANEL_BG = Color.parseColor("#3E3D32");
-            TAB_INACTIVE = Color.parseColor("#3E3D32"); ACCENT = Color.parseColor("#FD971F");
-            ACCENT_LIGHT = Color.parseColor("#FD971F"); TEXT = Color.parseColor("#F8F8F2");
-            TEXT_BRIGHT = Color.parseColor("#FFFFFF"); TEXT_DIM = Color.parseColor("#75715E");
-            GREEN = Color.parseColor("#A6E22E"); ORANGE = Color.parseColor("#E6DB74");
-            BLUE = Color.parseColor("#66D9EF"); COMMENT = Color.parseColor("#75715E");
-            YELLOW = Color.parseColor("#E6DB74"); PINK = Color.parseColor("#F92672");
-            NUMBER_CLR = Color.parseColor("#AE81FF");
+            BG=Color.parseColor("#272822"); SIDEBAR_BG=Color.parseColor("#1E1F1C");
+            ACTIVITY_BG=Color.parseColor("#1E1F1C"); PANEL_BG=Color.parseColor("#3E3D32");
+            TAB_INACTIVE=Color.parseColor("#3E3D32"); ACCENT=Color.parseColor("#FD971F");
+            ACCENT_LIGHT=Color.parseColor("#FD971F"); TEXT=Color.parseColor("#F8F8F2");
+            TEXT_BRIGHT=Color.parseColor("#FFFFFF"); TEXT_DIM=Color.parseColor("#75715E");
+            GREEN=Color.parseColor("#A6E22E"); ORANGE=Color.parseColor("#E6DB74");
+            BLUE=Color.parseColor("#66D9EF"); COMMENT=Color.parseColor("#75715E");
+            YELLOW=Color.parseColor("#E6DB74"); NUMBER_CLR=Color.parseColor("#AE81FF");
         } else if (theme.equals("light")) {
-            BG = Color.parseColor("#FFFFFF"); SIDEBAR_BG = Color.parseColor("#F3F3F3");
-            ACTIVITY_BG = Color.parseColor("#E7E7E7"); PANEL_BG = Color.parseColor("#ECECEC");
-            TAB_INACTIVE = Color.parseColor("#ECECEC"); ACCENT = Color.parseColor("#007ACC");
-            ACCENT_LIGHT = Color.parseColor("#0098FF"); TEXT = Color.parseColor("#333333");
-            TEXT_BRIGHT = Color.parseColor("#000000"); TEXT_DIM = Color.parseColor("#6C6C6C");
-            GREEN = Color.parseColor("#22863A"); ORANGE = Color.parseColor("#032F62");
-            BLUE = Color.parseColor("#0000FF"); COMMENT = Color.parseColor("#6A737D");
-            YELLOW = Color.parseColor("#795E26"); PINK = Color.parseColor("#D73A49");
-            NUMBER_CLR = Color.parseColor("#098658");
-        } else { // dark default
-            BG = Color.parseColor("#1E1E1E"); SIDEBAR_BG = Color.parseColor("#252526");
-            ACTIVITY_BG = Color.parseColor("#333333"); PANEL_BG = Color.parseColor("#2D2D2D");
-            TAB_INACTIVE = Color.parseColor("#2D2D2D"); ACCENT = Color.parseColor("#007ACC");
-            ACCENT_LIGHT = Color.parseColor("#1F8AD2"); TEXT = Color.parseColor("#CCCCCC");
-            TEXT_BRIGHT = Color.parseColor("#FFFFFF"); TEXT_DIM = Color.parseColor("#858585");
-            GREEN = Color.parseColor("#4EC9B0"); ORANGE = Color.parseColor("#CE9178");
-            BLUE = Color.parseColor("#569CD6"); COMMENT = Color.parseColor("#6A9955");
-            YELLOW = Color.parseColor("#DCDCAA"); PINK = Color.parseColor("#C586C0");
-            NUMBER_CLR = Color.parseColor("#B5CEA8");
+            BG=Color.parseColor("#FFFFFF"); SIDEBAR_BG=Color.parseColor("#F3F3F3");
+            ACTIVITY_BG=Color.parseColor("#E7E7E7"); PANEL_BG=Color.parseColor("#ECECEC");
+            TAB_INACTIVE=Color.parseColor("#ECECEC"); ACCENT=Color.parseColor("#007ACC");
+            ACCENT_LIGHT=Color.parseColor("#0098FF"); TEXT=Color.parseColor("#333333");
+            TEXT_BRIGHT=Color.parseColor("#000000"); TEXT_DIM=Color.parseColor("#6C6C6C");
+            GREEN=Color.parseColor("#22863A"); ORANGE=Color.parseColor("#032F62");
+            BLUE=Color.parseColor("#0000FF"); COMMENT=Color.parseColor("#6A737D");
+            YELLOW=Color.parseColor("#795E26"); NUMBER_CLR=Color.parseColor("#098658");
+        } else {
+            BG=Color.parseColor("#1E1E1E"); SIDEBAR_BG=Color.parseColor("#252526");
+            ACTIVITY_BG=Color.parseColor("#333333"); PANEL_BG=Color.parseColor("#2D2D2D");
+            TAB_INACTIVE=Color.parseColor("#2D2D2D"); ACCENT=Color.parseColor("#007ACC");
+            ACCENT_LIGHT=Color.parseColor("#1F8AD2"); TEXT=Color.parseColor("#CCCCCC");
+            TEXT_BRIGHT=Color.parseColor("#FFFFFF"); TEXT_DIM=Color.parseColor("#858585");
+            GREEN=Color.parseColor("#4EC9B0"); ORANGE=Color.parseColor("#CE9178");
+            BLUE=Color.parseColor("#569CD6"); COMMENT=Color.parseColor("#6A9955");
+            YELLOW=Color.parseColor("#DCDCAA"); NUMBER_CLR=Color.parseColor("#B5CEA8");
         }
     }
 
-    // ========== HELPERS ==========
+    // ========== HELPERS WITH RIPPLE ==========
     TextView tv(String s, int size) {
         TextView t = new TextView(this);
         t.setText(s); t.setTextSize(size); t.setTextColor(TEXT);
@@ -128,6 +165,18 @@ public class MainActivity extends Activity {
         t.setText(s); t.setTextSize(size);
         t.setTextColor(TEXT_DIM);
         t.setGravity(Gravity.CENTER);
+        t.setPadding(12, 8, 12, 8);
+        return t;
+    }
+
+    // ICON WITH TOOLTIP
+    TextView tipIcon(String icon, int size, final String tooltip) {
+        final TextView t = iconBtn(icon, size);
+        t.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                toast(tooltip); return true;
+            }
+        });
         return t;
     }
 
@@ -154,10 +203,10 @@ public class MainActivity extends Activity {
         titleBar.setBackgroundColor(SIDEBAR_BG);
         titleBar.setElevation(6);
 
-        TextView brand = tv("⚡ Aladdin", 15);
+        TextView brand = tv("⚡ Aladdin", 14);
         brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         brand.setTextColor(ACCENT);
-        brand.setPadding(15, 12, 10, 12);
+        brand.setPadding(12, 12, 8, 12);
         titleBar.addView(brand);
 
         titleBar.addView(menuBtn("File"));
@@ -169,17 +218,33 @@ public class MainActivity extends Activity {
         View sp1 = new View(this);
         titleBar.addView(sp1, new LinearLayout.LayoutParams(0, 1, 1));
 
-        TextView cmdBtn = iconBtn("⌘", 20);
+        TextView undoBtn = tipIcon("↶", 20, "Undo");
+        undoBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { performUndo(); }
+        });
+        titleBar.addView(undoBtn);
+
+        TextView redoBtn = tipIcon("↷", 20, "Redo");
+        redoBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { performRedo(); }
+        });
+        titleBar.addView(redoBtn);
+
+        TextView fmtBtn = tipIcon("≡", 20, "Format document");
+        fmtBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { formatDocument(); }
+        });
+        titleBar.addView(fmtBtn);
+
+        TextView cmdBtn = tipIcon("⌘", 20, "Command Palette");
         cmdBtn.setTextColor(ACCENT);
-        cmdBtn.setPadding(15, 8, 15, 8);
         cmdBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showCommandPalette(); }
         });
         titleBar.addView(cmdBtn);
 
-        TextView runBtn = iconBtn("▶", 16);
+        TextView runBtn = tipIcon("▶", 16, "Run Cloud Build");
         runBtn.setTextColor(ACCENT);
-        runBtn.setPadding(12, 8, 20, 8);
         runBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (currentProject == null) { toast("Open a project first"); return; }
@@ -199,27 +264,28 @@ public class MainActivity extends Activity {
         activityBar.setOrientation(LinearLayout.VERTICAL);
         activityBar.setBackgroundColor(ACTIVITY_BG);
         activityBar.setPadding(0, 10, 0, 10);
-        activityBar.addView(activityIcon("📁", 0));
-        activityBar.addView(activityIcon("🔍", 1));
-        activityBar.addView(activityIcon("⑂", 2));
-        activityBar.addView(activityIcon("📦", 3));
-        activityBar.addView(activityIcon("⚙", 4));
+        activityBar.addView(activityIcon("📁", 0, "Explorer"));
+        activityBar.addView(activityIcon("🔍", 1, "Search"));
+        activityBar.addView(activityIcon("⑂", 2, "Source Control"));
+        activityBar.addView(activityIcon("📦", 3, "Snippets"));
+        activityBar.addView(activityIcon("🧠", 4, "Outline — classes & methods"));
+        activityBar.addView(activityIcon("⚙", 5, "Settings"));
         View sp2 = new View(this);
         activityBar.addView(sp2, new LinearLayout.LayoutParams(1, 0, 1));
         mainRow.addView(activityBar, new LinearLayout.LayoutParams(58,
                 LinearLayout.LayoutParams.MATCH_PARENT));
 
-        // SIDEBAR (now 260 wide so text doesn't wrap)
-        LinearLayout sidebarWrap = new LinearLayout(this);
-        sidebarWrap.setOrientation(LinearLayout.VERTICAL);
-        sidebarWrap.setBackgroundColor(SIDEBAR_BG);
+        // SIDEBAR
+        sidebar = new LinearLayout(this);
+        sidebar.setOrientation(LinearLayout.VERTICAL);
+        sidebar.setBackgroundColor(SIDEBAR_BG);
         sidebarScroll = new ScrollView(this);
         sidebarContent = new LinearLayout(this);
         sidebarContent.setOrientation(LinearLayout.VERTICAL);
         sidebarScroll.addView(sidebarContent);
-        sidebarWrap.addView(sidebarScroll, new LinearLayout.LayoutParams(
+        sidebar.addView(sidebarScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-        mainRow.addView(sidebarWrap, new LinearLayout.LayoutParams(260,
+        mainRow.addView(sidebar, new LinearLayout.LayoutParams(260,
                 LinearLayout.LayoutParams.MATCH_PARENT));
 
         // EDITOR
@@ -234,6 +300,14 @@ public class MainActivity extends Activity {
         breadcrumbText = tv("", 11);
         breadcrumbText.setTextColor(TEXT_DIM);
         breadcrumbText.setPadding(0, 0, 0, 0);
+        breadcrumbText.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (currentFile == null) return;
+                android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("path", currentFile.getAbsolutePath()));
+                toast("📋 Path copied");
+            }
+        });
         breadcrumbBar.addView(breadcrumbText);
         editorArea.addView(breadcrumbBar);
 
@@ -246,17 +320,16 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, 42));
 
         welcomeScreen = new TextView(this);
-        welcomeScreen.setText("\n\n⚡  ALADDIN IDE  v5.0\n\n" +
-                "─  Power User Edition  ─\n\n" +
-                "  ⌘  Command Palette (20+ commands)\n" +
-                "  📁  Explorer with collapsible tree\n" +
-                "  🔍  Full-text Search\n" +
-                "  ⑂  Source Control & Cloud Build\n" +
-                "  📦  Snippets — insert code templates\n" +
-                "  ⚙  Settings — 4 themes + preferences\n" +
-                "  🗺  Minimap\n" +
-                "  🖥  Zen Mode — fullscreen coding\n\n" +
-                "Open a file to begin");
+        welcomeScreen.setText("\n\n⚡  ALADDIN IDE  v6.0\n\n" +
+                "─  Intelligent Edition  ─\n\n" +
+                "  ↶↷  Undo / Redo\n" +
+                "  ≡   Format document\n" +
+                "  🧠  Outline (classes & methods)\n" +
+                "  💾  Auto-save every 30s\n" +
+                "  ⌘   Command Palette\n" +
+                "  📦  Snippets library\n" +
+                "  🎨  4 themes\n\n" +
+                "Long-press any icon for help");
         welcomeScreen.setTextColor(TEXT_DIM);
         welcomeScreen.setTextSize(13);
         welcomeScreen.setGravity(Gravity.CENTER);
@@ -264,7 +337,6 @@ public class MainActivity extends Activity {
         editorArea.addView(welcomeScreen, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
-        // Editor row (line numbers + code + minimap)
         LinearLayout editorRow = new LinearLayout(this);
         editorRow.setOrientation(LinearLayout.HORIZONTAL);
 
@@ -292,7 +364,22 @@ public class MainActivity extends Activity {
 
         codeEditor.addTextChangedListener(new TextWatcher() {
             boolean self = false;
-            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {
+                if (recordingUndo) {
+                    String now = s.toString();
+                    if (!now.equals(lastText)) {
+                        long t = System.currentTimeMillis();
+                        if (t - lastEditTime > 1500) {
+                            undoStack.add(lastText);
+                            undoPos.add(codeEditor.getSelectionStart());
+                            if (undoStack.size() > 50) { undoStack.remove(0); undoPos.remove(0); }
+                            redoStack.clear(); redoPos.clear();
+                        }
+                        lastEditTime = t;
+                        lastText = now;
+                    }
+                }
+            }
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
                 if (self || !autoClose) return;
                 if (c > b && st + c <= s.length()) {
@@ -428,22 +515,135 @@ public class MainActivity extends Activity {
         statusBar.setOrientation(LinearLayout.HORIZONTAL);
         statusBar.setBackgroundColor(ACCENT);
         statusBar.setGravity(Gravity.CENTER_VERTICAL);
-        statusLeft = tv("  ⑂ main   ✓ 0   ⚠ 0", 10);
-        statusLeft.setTextColor(Color.WHITE);
-        statusLeft.setPadding(15, 8, 8, 8);
-        statusBar.addView(statusLeft);
+
+        statusFile = tv("  ⑂ main  ✓ 0", 10);
+        statusFile.setTextColor(Color.WHITE);
+        statusFile.setPadding(15, 8, 8, 8);
+        statusBar.addView(statusFile);
+
         View sp4 = new View(this);
         statusBar.addView(sp4, new LinearLayout.LayoutParams(0, 1, 1));
-        statusRight = tv("Ln 1, Col 1   UTF-8   LF   Java   ", 10);
+
+        statusRight = tv("Ln 1, Col 1", 10);
         statusRight.setTextColor(Color.WHITE);
-        statusRight.setPadding(8, 8, 15, 8);
+        statusRight.setPadding(8, 8, 8, 8);
+        statusRight.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showGotoLine(); }
+        });
         statusBar.addView(statusRight);
+
+        TextView sep = tv("  UTF-8  ", 10);
+        sep.setTextColor(Color.WHITE);
+        sep.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { toast("UTF-8 encoding (fixed)"); }
+        });
+        statusBar.addView(sep);
+
+        statusLang = tv("Java   ", 10);
+        statusLang.setTextColor(Color.WHITE);
+        statusLang.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showLanguagePicker(); }
+        });
+        statusBar.addView(statusLang);
+
         root.addView(statusBar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 36));
 
         setContentView(root);
         selectActivity(0);
         setPanelTab(2);
+    }
+
+    // ========== UNDO / REDO ==========
+    void performUndo() {
+        if (undoStack.isEmpty()) { toast("Nothing to undo"); return; }
+        redoStack.add(codeEditor.getText().toString());
+        redoPos.add(codeEditor.getSelectionStart());
+        String prev = undoStack.remove(undoStack.size() - 1);
+        int pos = undoPos.remove(undoPos.size() - 1);
+        recordingUndo = false;
+        codeEditor.setText(prev);
+        try { codeEditor.setSelection(Math.min(pos, prev.length())); } catch (Exception e) {}
+        recordingUndo = true;
+        lastText = prev;
+        toast("↶ Undo");
+    }
+
+    void performRedo() {
+        if (redoStack.isEmpty()) { toast("Nothing to redo"); return; }
+        undoStack.add(codeEditor.getText().toString());
+        undoPos.add(codeEditor.getSelectionStart());
+        String next = redoStack.remove(redoStack.size() - 1);
+        int pos = redoPos.remove(redoPos.size() - 1);
+        recordingUndo = false;
+        codeEditor.setText(next);
+        try { codeEditor.setSelection(Math.min(pos, next.length())); } catch (Exception e) {}
+        recordingUndo = true;
+        lastText = next;
+        toast("↷ Redo");
+    }
+
+    // ========== FORMAT DOCUMENT ==========
+    void formatDocument() {
+        if (currentFile == null) { toast("No file open"); return; }
+        String text = codeEditor.getText().toString();
+        StringBuilder out = new StringBuilder();
+        int indent = 0;
+        String[] lines = text.split("\n");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("}")) indent = Math.max(0, indent - 1);
+            StringBuilder pad = new StringBuilder();
+            for (int i = 0; i < indent; i++) pad.append("    ");
+            out.append(pad).append(trimmed).append("\n");
+            int opens = count(trimmed, '{');
+            int closes = count(trimmed, '}');
+            indent += opens - closes;
+            if (trimmed.startsWith("}") && opens > closes) indent += 0;
+            if (indent < 0) indent = 0;
+        }
+        codeEditor.setText(out.toString());
+        toast("≡ Formatted");
+    }
+
+    int count(String s, char c) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++;
+        return n;
+    }
+
+    // ========== GOTO LINE ==========
+    void showGotoLine() {
+        final EditText input = new EditText(this);
+        input.setHint("Line number");
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        new AlertDialog.Builder(this).setTitle("Go to Line").setView(input)
+                .setPositiveButton("Go", new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        try {
+                            int line = Integer.parseInt(input.getText().toString());
+                            String text = codeEditor.getText().toString();
+                            int idx = 0, cur = 1;
+                            while (cur < line && idx < text.length()) {
+                                if (text.charAt(idx) == '\n') cur++;
+                                idx++;
+                            }
+                            codeEditor.setSelection(Math.min(idx, text.length()));
+                        } catch (Exception e) {}
+                    }
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    // ========== LANGUAGE PICKER ==========
+    void showLanguagePicker() {
+        final String[] langs = {"Java","XML","Groovy","JSON","Markdown","Plain"};
+        new AlertDialog.Builder(this).setTitle("Change Language")
+                .setItems(langs, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        statusLang.setText(langs[w] + "   ");
+                        toast("Language: " + langs[w]);
+                    }
+                }).show();
     }
 
     // ========== MENU BAR ==========
@@ -463,17 +663,16 @@ public class MainActivity extends Activity {
 
     void showMenu(String menu) {
         String[] items;
-        if (menu.equals("File")) items = new String[]{"New Project", "Open Recent", "Save", "Save All", "Close File"};
-        else if (menu.equals("Edit")) items = new String[]{"Find & Replace", "Format Code", "Insert Snippet", "Toggle Comment"};
-        else if (menu.equals("View")) items = new String[]{"Toggle Zen Mode", "Toggle Minimap", "Toggle Word Wrap", "Change Theme"};
-        else if (menu.equals("Run")) items = new String[]{"Cloud Build", "View GitHub Actions", "Clear Output"};
-        else items = new String[]{"About Aladdin IDE", "Keyboard Shortcuts", "GitHub Docs"};
+        if (menu.equals("File")) items = new String[]{"New Project","Open Recent","Save","Save All","Close File"};
+        else if (menu.equals("Edit")) items = new String[]{"Undo","Redo","Find & Replace","Format Document","Go to Line","Insert Snippet"};
+        else if (menu.equals("View")) items = new String[]{"Toggle Zen Mode","Toggle Minimap","Toggle Word Wrap","Change Theme"};
+        else if (menu.equals("Run")) items = new String[]{"Cloud Build","View GitHub Actions","Clear Output"};
+        else items = new String[]{"About Aladdin IDE","Keyboard Shortcuts","GitHub Docs"};
 
-        new AlertDialog.Builder(this).setTitle(menu + " Menu")
+        new AlertDialog.Builder(this).setTitle(menu)
                 .setItems(items, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
-                        String sel = items[w];
-                        handleMenuAction(sel);
+                        handleMenuAction(items[w]);
                     }
                 }).show();
     }
@@ -484,7 +683,11 @@ public class MainActivity extends Activity {
         else if (action.equals("Save")) saveCurrentFile();
         else if (action.equals("Save All")) saveAll();
         else if (action.equals("Close File")) closeCurrentFile();
+        else if (action.equals("Undo")) performUndo();
+        else if (action.equals("Redo")) performRedo();
         else if (action.equals("Find & Replace")) showFindReplace();
+        else if (action.equals("Format Document")) formatDocument();
+        else if (action.equals("Go to Line")) showGotoLine();
         else if (action.equals("Insert Snippet")) selectActivity(3);
         else if (action.equals("Toggle Zen Mode")) toggleZen();
         else if (action.equals("Toggle Minimap")) {
@@ -510,6 +713,12 @@ public class MainActivity extends Activity {
         }
         else if (action.equals("Clear Output")) consoleOutput.setText("");
         else if (action.equals("About Aladdin IDE")) showAbout();
+        else if (action.equals("Keyboard Shortcuts")) {
+            toast("⌘ palette · ↶ undo · ↷ redo · ≡ format");
+        }
+        else if (action.equals("GitHub Docs")) {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://docs.github.com")));
+        }
     }
 
     void saveAll() {
@@ -542,29 +751,28 @@ public class MainActivity extends Activity {
         zenMode = !zenMode;
         activityBar.setVisibility(zenMode ? View.GONE : View.VISIBLE);
         sidebar.setVisibility(zenMode ? View.GONE : View.VISIBLE);
-        View sidebarWrap = (View) sidebar.getParent();
-        if (sidebarWrap != null) sidebarWrap.setVisibility(zenMode ? View.GONE : View.VISIBLE);
         toast(zenMode ? "Zen Mode on" : "Zen Mode off");
     }
 
     void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("About Aladdin IDE")
-                .setMessage("⚡ Aladdin IDE v5.0\n\nPower User Edition\n\n" +
-                        "Built entirely on Android using:\n" +
-                        "• Termux (build environment)\n" +
-                        "• GitHub Actions (cloud compiler)\n" +
-                        "• Pure Java UI (no XML layouts)\n\n" +
-                        "Features:\n" +
-                        "✓ 4 themes\n✓ Command palette\n✓ Minimap\n" +
-                        "✓ Code snippets\n✓ Cloud build + auto-install\n" +
-                        "✓ Full-text search\n✓ Working menu bar")
+                .setMessage("⚡ Aladdin IDE v6.0\n\nIntelligent Edition\n\n" +
+                        "Built on Android using Termux + GitHub Actions\n\n" +
+                        "New in v6.0:\n" +
+                        "✓ Undo / Redo stack\n" +
+                        "✓ Auto-save every 30s\n" +
+                        "✓ Format document\n" +
+                        "✓ Go to Line\n" +
+                        "✓ Symbol outline\n" +
+                        "✓ Smart status bar\n" +
+                        "✓ Tooltips on long-press")
                 .setPositiveButton("Close", null)
                 .show();
     }
 
     void showThemePicker() {
-        final String[] themes = {"dark", "dracula", "monokai", "light"};
+        final String[] themes = {"dark","dracula","monokai","light"};
         new AlertDialog.Builder(this).setTitle("Select Theme")
                 .setItems(themes, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
@@ -572,18 +780,14 @@ public class MainActivity extends Activity {
                         applyTheme(currentTheme);
                         getSharedPreferences("AladdinPrefs", MODE_PRIVATE).edit()
                                 .putString("theme", currentTheme).apply();
-                        rebuildUI();
+                        selectActivity(activeActivity);
+                        toast("Theme: " + currentTheme);
                     }
                 }).show();
     }
 
-    void rebuildUI() {
-        selectActivity(activeActivity);
-        if (currentFile != null) loadFile(currentFile);
-    }
-
     // ========== ACTIVITY BAR ==========
-    TextView activityIcon(String icon, final int index) {
+    TextView activityIcon(String icon, final int index, final String tip) {
         final TextView t = new TextView(this);
         t.setText(icon);
         t.setTextSize(22);
@@ -593,12 +797,15 @@ public class MainActivity extends Activity {
         t.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { selectActivity(index); }
         });
+        t.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) { toast(tip); return true; }
+        });
         return t;
     }
 
     void selectActivity(int index) {
         activeActivity = index;
-        String[] icons = {"📁", "🔍", "⑂", "📦", "⚙"};
+        String[] icons = {"📁","🔍","⑂","📦","🧠","⚙"};
         for (int i = 0; i < activityBar.getChildCount(); i++) {
             View c = activityBar.getChildAt(i);
             if (c instanceof TextView) {
@@ -617,6 +824,7 @@ public class MainActivity extends Activity {
         else if (index == 1) buildSearchPanel();
         else if (index == 2) buildSourcePanel();
         else if (index == 3) buildSnippetsPanel();
+        else if (index == 4) buildOutlinePanel();
         else buildSettingsPanel();
     }
 
@@ -634,8 +842,7 @@ public class MainActivity extends Activity {
         header.addView(title, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
-        TextView nf = iconBtn("📄+", 13);
-        nf.setPadding(10, 5, 10, 5);
+        TextView nf = tipIcon("📄+", 13, "New file");
         nf.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (currentProject == null) { toast("Open a project first"); return; }
@@ -643,8 +850,7 @@ public class MainActivity extends Activity {
             }
         });
         header.addView(nf);
-        TextView nd = iconBtn("📁+", 13);
-        nd.setPadding(10, 5, 10, 5);
+        TextView nd = tipIcon("📁+", 13, "New folder");
         nd.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 if (currentProject == null) { toast("Open a project first"); return; }
@@ -652,8 +858,7 @@ public class MainActivity extends Activity {
             }
         });
         header.addView(nd);
-        TextView rf = iconBtn("↻", 15);
-        rf.setPadding(10, 5, 10, 5);
+        TextView rf = tipIcon("↻", 15, "Refresh");
         rf.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { selectActivity(0); }
         });
@@ -661,14 +866,19 @@ public class MainActivity extends Activity {
         sidebarContent.addView(header);
 
         File[] list = projectsDir.listFiles();
-        if (list == null) return;
+        if (list == null || list.length == 0) {
+            buildEmptyExplorer();
+            return;
+        }
         Arrays.sort(list, new Comparator<File>() {
             @Override public int compare(File a, File b) {
                 return a.getName().compareToIgnoreCase(b.getName());
             }
         });
+        boolean any = false;
         for (final File p : list) {
             if (!p.isDirectory()) continue;
+            any = true;
             projectList.add(p);
             boolean isOpen = p.equals(currentProject);
             String icon = isOpen ? "▾ " : "▸ ";
@@ -678,14 +888,68 @@ public class MainActivity extends Activity {
             item.setPadding(18, 12, 12, 12);
             item.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
-                    currentProject = p;
-                    statusLeft.setText("  ⑂ " + p.getName());
+                    if (currentProject != null && currentProject.equals(p)) {
+                        currentProject = null;
+                    } else {
+                        currentProject = p;
+                        statusFile.setText("  ⑂ " + p.getName());
+                    }
                     selectActivity(0);
+                }
+            });
+            item.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override public boolean onLongClick(View v) {
+                    showProjectMenu(p); return true;
                 }
             });
             sidebarContent.addView(item);
             if (isOpen) renderTree(p, 1);
         }
+        if (!any) buildEmptyExplorer();
+    }
+
+    void buildEmptyExplorer() {
+        TextView empty = tv("\n\n  📭\n\n  No projects yet\n\n  Create your first Android project to get started.", 12);
+        empty.setTextColor(TEXT_DIM);
+        empty.setPadding(20, 30, 20, 20);
+        empty.setGravity(Gravity.CENTER);
+        sidebarContent.addView(empty);
+
+        Button btn = btn("+  Create Project");
+        btn.setTextColor(Color.WHITE);
+        btn.setBackgroundColor(ACCENT);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        p.setMargins(18, 10, 18, 10);
+        btn.setLayoutParams(p);
+        btn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { createProject(); }
+        });
+        sidebarContent.addView(btn);
+    }
+
+    void showProjectMenu(final File proj) {
+        final String[] opts = {"Open","Delete Project"};
+        new AlertDialog.Builder(this).setTitle(proj.getName())
+                .setItems(opts, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        if (opts[w].equals("Open")) {
+                            currentProject = proj;
+                            selectActivity(0);
+                        } else {
+                            new AlertDialog.Builder(MainActivity.this)
+                                    .setTitle("Delete Project")
+                                    .setMessage("Delete " + proj.getName() + " permanently?")
+                                    .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
+                                        @Override public void onClick(DialogInterface dd, int ww) {
+                                            deleteRec(proj);
+                                            if (proj.equals(currentProject)) currentProject = null;
+                                            selectActivity(0);
+                                        }
+                                    }).setNegativeButton("Cancel", null).show();
+                        }
+                    }
+                }).show();
     }
 
     void renderTree(File dir, int depth) {
@@ -746,6 +1010,83 @@ public class MainActivity extends Activity {
         return "📃";
     }
 
+    // ========== OUTLINE PANEL ==========
+    void buildOutlinePanel() {
+        TextView title = tv("OUTLINE", 11);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setTextColor(TEXT_DIM);
+        title.setPadding(18, 18, 12, 12);
+        sidebarContent.addView(title);
+
+        if (currentFile == null) {
+            TextView msg = tv("No file open.\n\nOpen a Java file to see its classes and methods.", 12);
+            msg.setTextColor(TEXT_DIM);
+            msg.setPadding(18, 15, 18, 15);
+            sidebarContent.addView(msg);
+            return;
+        }
+        String text = codeEditor.getText().toString();
+        ArrayList<String> symbols = extractSymbols(text);
+        if (symbols.isEmpty()) {
+            TextView msg = tv("No symbols found in this file.", 12);
+            msg.setTextColor(TEXT_DIM);
+            msg.setPadding(18, 15, 18, 15);
+            sidebarContent.addView(msg);
+            return;
+        }
+        for (final String s : symbols) {
+            TextView sym = tv(s, 12);
+            sym.setTextColor(s.startsWith("C ") ? ACCENT_LIGHT : TEXT);
+            sym.setPadding(18, 10, 12, 10);
+            final int line = extractLineNumber(s);
+            sym.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (line > 0) gotoLine(line);
+                }
+            });
+            sidebarContent.addView(sym);
+        }
+    }
+
+    ArrayList<String> extractSymbols(String text) {
+        ArrayList<String> out = new ArrayList<String>();
+        String[] lines = text.split("\n");
+        Pattern classPat = Pattern.compile("(class|interface|enum)\\s+(\\w+)");
+        Pattern methodPat = Pattern.compile("(public|private|protected|static|void|int|String|boolean|double|float|long)\\s+[\\w<>\\[\\]]+\\s+(\\w+)\\s*\\(");
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            Matcher cm = classPat.matcher(line);
+            if (cm.find() && !line.startsWith("//")) {
+                out.add("C " + cm.group(1) + " " + cm.group(2) + "  — line " + (i+1));
+                continue;
+            }
+            Matcher mm = methodPat.matcher(line);
+            if (mm.find() && !line.startsWith("//") && !line.contains("new ")) {
+                out.add("    ▸ " + mm.group(2) + "()  — line " + (i+1));
+            }
+        }
+        return out;
+    }
+
+    int extractLineNumber(String s) {
+        int idx = s.lastIndexOf("line ");
+        if (idx < 0) return -1;
+        try {
+            return Integer.parseInt(s.substring(idx + 5).trim());
+        } catch (Exception e) { return -1; }
+    }
+
+    void gotoLine(int line) {
+        String text = codeEditor.getText().toString();
+        int idx = 0, cur = 1;
+        while (cur < line && idx < text.length()) {
+            if (text.charAt(idx) == '\n') cur++;
+            idx++;
+        }
+        codeEditor.setSelection(Math.min(idx, text.length()));
+        toast("→ Line " + line);
+    }
+
     // ========== SEARCH ==========
     void buildSearchPanel() {
         TextView title = tv("SEARCH", 11);
@@ -763,9 +1104,16 @@ public class MainActivity extends Activity {
         query.setPadding(15, 12, 15, 12);
         LinearLayout.LayoutParams qp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        qp.setMargins(18, 5, 18, 10);
+        qp.setMargins(18, 5, 18, 8);
         query.setLayoutParams(qp);
         sidebarContent.addView(query);
+
+        final CheckBox cs = new CheckBox(this);
+        cs.setText("Case sensitive");
+        cs.setTextColor(TEXT_DIM);
+        cs.setTextSize(11);
+        cs.setPadding(18, 3, 18, 8);
+        sidebarContent.addView(cs);
 
         Button searchBtn = btn("🔍  Search");
         searchBtn.setTextColor(Color.WHITE);
@@ -776,6 +1124,7 @@ public class MainActivity extends Activity {
         searchBtn.setLayoutParams(bp);
         searchBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
+                searchCase = cs.isChecked();
                 String q = query.getText().toString().trim();
                 if (q.isEmpty()) return;
                 performSearch(q);
@@ -801,9 +1150,21 @@ public class MainActivity extends Activity {
         header.setPadding(18, 10, 12, 10);
         results.addView(header);
         for (String s : found) {
-            TextView r = tv(s, 11);
+            final String[] parts = s.split("\\|");
+            TextView r = tv("  " + parts[0] + ":" + parts[1], 11);
             r.setTextColor(TEXT_DIM);
-            r.setPadding(22, 6, 12, 6);
+            r.setPadding(22, 8, 12, 8);
+            r.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    try {
+                        File target = new File(currentProject, parts[0]);
+                        if (target.exists()) {
+                            openFile(target);
+                            gotoLine(Integer.parseInt(parts[1]));
+                        }
+                    } catch (Exception e) {}
+                }
+            });
             results.addView(r);
         }
     }
@@ -813,13 +1174,15 @@ public class MainActivity extends Activity {
         if (files == null) return;
         for (File f : files) {
             if (f.isDirectory()) searchInDir(f, q, out);
-            else if (f.length() < 500000) {
+            else if (f.length() < 500000 && !f.getName().startsWith(".")) {
                 try {
                     String content = readFile(f);
                     String[] lines = content.split("\n");
                     for (int i = 0; i < lines.length; i++) {
-                        if (lines[i].contains(q)) {
-                            out.add(f.getName() + ":" + (i+1));
+                        String line = searchCase ? lines[i] : lines[i].toLowerCase();
+                        String needle = searchCase ? q : q.toLowerCase();
+                        if (line.contains(needle)) {
+                            out.add(f.getName() + "|" + (i+1));
                             if (out.size() > 100) return;
                         }
                     }
@@ -837,7 +1200,7 @@ public class MainActivity extends Activity {
         sidebarContent.addView(title);
 
         if (githubUser.isEmpty() || githubRepo.isEmpty()) {
-            TextView msg = tv("No repository configured.\n\nGo to Settings to add\nGitHub username, repo, and token.", 12);
+            TextView msg = tv("No repository configured.\n\nGo to Settings to add GitHub username, repo, and token.", 12);
             msg.setTextColor(TEXT_DIM);
             msg.setPadding(18, 15, 18, 15);
             sidebarContent.addView(msg);
@@ -849,7 +1212,7 @@ public class MainActivity extends Activity {
             sp.setMargins(18, 10, 18, 10);
             setup.setLayoutParams(sp);
             setup.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { selectActivity(4); }
+                @Override public void onClick(View v) { selectActivity(5); }
             });
             sidebarContent.addView(setup);
         } else {
@@ -896,21 +1259,23 @@ public class MainActivity extends Activity {
                     TextView f = tv("  ● " + d.getName(), 12);
                     f.setTextColor(YELLOW);
                     f.setPadding(18, 6, 12, 6);
+                    f.setOnClickListener(new View.OnClickListener() {
+                        @Override public void onClick(View v) { openFile(d); }
+                    });
                     sidebarContent.addView(f);
                 }
             }
         }
     }
 
-    // ========== SNIPPETS PANEL ==========
+    // ========== SNIPPETS ==========
     void buildSnippetsPanel() {
         TextView title = tv("SNIPPETS", 11);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setTextColor(TEXT_DIM);
         title.setPadding(18, 18, 12, 12);
         sidebarContent.addView(title);
-
-        TextView help = tv("Tap a snippet to insert it at the cursor position.", 11);
+        TextView help = tv("Tap to insert at cursor position.", 11);
         help.setTextColor(TEXT_DIM);
         help.setPadding(18, 5, 18, 15);
         sidebarContent.addView(help);
@@ -918,11 +1283,11 @@ public class MainActivity extends Activity {
         addSnippet("☕ Java — Activity Class", "package com.example;\n\nimport android.app.Activity;\nimport android.os.Bundle;\n\npublic class MyActivity extends Activity {\n    @Override\n    protected void onCreate(Bundle savedInstanceState) {\n        super.onCreate(savedInstanceState);\n    }\n}\n");
         addSnippet("☕ Java — For Loop", "for (int i = 0; i < 10; i++) {\n    \n}\n");
         addSnippet("☕ Java — Try Catch", "try {\n    \n} catch (Exception e) {\n    e.printStackTrace();\n}\n");
-        addSnippet("☕ Java — Toast Message", "Toast.makeText(this, \"Hello\", Toast.LENGTH_SHORT).show();\n");
+        addSnippet("☕ Java — Toast", "Toast.makeText(this, \"Hello\", Toast.LENGTH_SHORT).show();\n");
         addSnippet("📄 XML — LinearLayout", "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n    android:layout_width=\"match_parent\"\n    android:layout_height=\"match_parent\"\n    android:orientation=\"vertical\">\n    \n</LinearLayout>\n");
         addSnippet("📄 XML — TextView", "<TextView\n    android:layout_width=\"wrap_content\"\n    android:layout_height=\"wrap_content\"\n    android:text=\"Hello\" />\n");
         addSnippet("📄 XML — Button", "<Button\n    android:layout_width=\"wrap_content\"\n    android:layout_height=\"wrap_content\"\n    android:text=\"Click Me\" />\n");
-        addSnippet("🐘 Gradle — App Build", "plugins {\n    id 'com.android.application'\n}\n\nandroid {\n    namespace 'com.example.app'\n    compileSdk 34\n    defaultConfig {\n        applicationId 'com.example.app'\n        minSdk 24\n        targetSdk 34\n        versionCode 1\n        versionName '1.0'\n    }\n}\n");
+        addSnippet("🐘 Gradle — App", "plugins {\n    id 'com.android.application'\n}\n\nandroid {\n    namespace 'com.example.app'\n    compileSdk 34\n    defaultConfig {\n        applicationId 'com.example.app'\n        minSdk 24\n        targetSdk 34\n        versionCode 1\n        versionName '1.0'\n    }\n}\n");
         addSnippet("📋 JSON — Object", "{\n    \"key\": \"value\",\n    \"number\": 42\n}\n");
     }
 
@@ -939,13 +1304,13 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) {
                 int start = codeEditor.getSelectionStart();
                 codeEditor.getText().insert(start, code);
-                toast("Snippet inserted: " + name);
+                toast("Inserted: " + name);
             }
         });
         sidebarContent.addView(item);
     }
 
-    // ========== SETTINGS PANEL ==========
+    // ========== SETTINGS ==========
     void buildSettingsPanel() {
         TextView title = tv("SETTINGS", 11);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -980,7 +1345,7 @@ public class MainActivity extends Activity {
         final CheckBox mmBox = settingsCheck("Show minimap", minimapOn);
 
         settingsSection("ABOUT");
-        TextView about = tv("Aladdin IDE v5.0\nPower User Edition\n\nBuilt on Android with Termux + GitHub Actions", 11);
+        TextView about = tv("Aladdin IDE v6.0\nIntelligent Edition\n\nTermux + GitHub Actions", 11);
         about.setTextColor(TEXT_DIM);
         about.setPadding(18, 10, 18, 20);
         sidebarContent.addView(about);
@@ -1010,14 +1375,10 @@ public class MainActivity extends Activity {
                 lineNumbers.setVisibility(lineNumbersOn ? View.VISIBLE : View.GONE);
                 minimap.setVisibility(minimapOn ? View.VISIBLE : View.GONE);
                 getSharedPreferences("AladdinPrefs", MODE_PRIVATE).edit()
-                        .putString("user", githubUser)
-                        .putString("repo", githubRepo)
-                        .putString("token", githubToken)
-                        .putInt("fontSize", fontSize)
-                        .putBoolean("wordWrap", wordWrap)
-                        .putBoolean("autoClose", autoClose)
-                        .putBoolean("lineNumbers", lineNumbersOn)
-                        .putBoolean("minimap", minimapOn)
+                        .putString("user", githubUser).putString("repo", githubRepo)
+                        .putString("token", githubToken).putInt("fontSize", fontSize)
+                        .putBoolean("wordWrap", wordWrap).putBoolean("autoClose", autoClose)
+                        .putBoolean("lineNumbers", lineNumbersOn).putBoolean("minimap", minimapOn)
                         .apply();
                 toast("✓ Settings saved");
             }
@@ -1035,12 +1396,9 @@ public class MainActivity extends Activity {
 
     EditText settingsField(String hint, String value) {
         EditText e = new EditText(this);
-        e.setHint(hint);
-        e.setText(value);
-        e.setTextColor(TEXT);
-        e.setHintTextColor(TEXT_DIM);
-        e.setTextSize(12);
-        e.setBackgroundColor(PANEL_BG);
+        e.setHint(hint); e.setText(value);
+        e.setTextColor(TEXT); e.setHintTextColor(TEXT_DIM);
+        e.setTextSize(12); e.setBackgroundColor(PANEL_BG);
         e.setPadding(15, 12, 15, 12);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -1052,11 +1410,8 @@ public class MainActivity extends Activity {
 
     CheckBox settingsCheck(String label, boolean checked) {
         CheckBox c = new CheckBox(this);
-        c.setText(label);
-        c.setTextColor(TEXT);
-        c.setTextSize(12);
-        c.setChecked(checked);
-        c.setPadding(18, 5, 18, 5);
+        c.setText(label); c.setTextColor(TEXT); c.setTextSize(12);
+        c.setChecked(checked); c.setPadding(18, 5, 18, 5);
         sidebarContent.addView(c);
         return c;
     }
@@ -1066,7 +1421,9 @@ public class MainActivity extends Activity {
         final String[] commands = {
                 "📁  New Project", "📄  New File", "📂  New Folder",
                 "💾  Save File", "💾  Save All Files", "✕  Close File",
-                "🔍  Find & Replace", "📦  Insert Snippet",
+                "↶  Undo", "↷  Redo", "≡  Format Document",
+                "🔍  Find & Replace", "→  Go to Line",
+                "📦  Insert Snippet", "🧠  Symbol Outline",
                 "▶  Trigger Cloud Build", "🌐  View GitHub Actions",
                 "🎨  Change Theme", "🗺  Toggle Minimap",
                 "↩  Toggle Word Wrap", "🖥  Toggle Zen Mode",
@@ -1078,8 +1435,7 @@ public class MainActivity extends Activity {
                 .setTitle("⌘  Command Palette")
                 .setItems(commands, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
-                        String cmd = commands[w].substring(3).trim();
-                        executeCommand(cmd);
+                        executeCommand(commands[w].substring(3).trim());
                     }
                 }).show();
     }
@@ -1097,8 +1453,13 @@ public class MainActivity extends Activity {
         else if (cmd.equals("Save File")) saveCurrentFile();
         else if (cmd.equals("Save All Files")) saveAll();
         else if (cmd.equals("Close File")) closeCurrentFile();
+        else if (cmd.equals("Undo")) performUndo();
+        else if (cmd.equals("Redo")) performRedo();
+        else if (cmd.equals("Format Document")) formatDocument();
         else if (cmd.equals("Find & Replace")) showFindReplace();
+        else if (cmd.equals("Go to Line")) showGotoLine();
         else if (cmd.equals("Insert Snippet")) selectActivity(3);
+        else if (cmd.equals("Symbol Outline")) selectActivity(4);
         else if (cmd.equals("Trigger Cloud Build")) {
             if (currentProject == null) { toast("Open a project first"); return; }
             triggerCloudBuild();
@@ -1121,7 +1482,7 @@ public class MainActivity extends Activity {
         }
         else if (cmd.equals("Toggle Zen Mode")) toggleZen();
         else if (cmd.equals("Open Recent File")) showRecentFiles();
-        else if (cmd.equals("Open Settings")) selectActivity(4);
+        else if (cmd.equals("Open Settings")) selectActivity(5);
         else if (cmd.equals("About Aladdin IDE")) showAbout();
         else if (cmd.equals("Refresh Explorer")) { selectActivity(0); toast("Refreshed"); }
         else if (cmd.equals("Copy File Path")) {
@@ -1158,7 +1519,7 @@ public class MainActivity extends Activity {
         }
         if (index == 0) consoleOutput.setText("No problems detected in the workspace.");
         else if (index == 1) consoleOutput.setText("Output log ready.\nRun a build to see results.");
-        else if (index == 2) consoleOutput.setText("$ _\nAladdin Terminal v5.0\nReady for cloud build.");
+        else if (index == 2) consoleOutput.setText("$ _\nAladdin Terminal v6.0\nReady for cloud build.");
         else if (index == 3) consoleOutput.setText("Debug console.\nNo active session.");
     }
 
@@ -1197,13 +1558,18 @@ public class MainActivity extends Activity {
             currentFile = f;
             String content = unsavedChanges.containsKey(f.getAbsolutePath())
                     ? unsavedChanges.get(f.getAbsolutePath()) : readFile(f);
+            recordingUndo = false;
             codeEditor.setText(content);
+            lastText = content;
+            undoStack.clear(); redoStack.clear();
+            recordingUndo = true;
             breadcrumbText.setText("▸  " + (currentProject != null ? currentProject.getName() : "") + "  ▸  " + f.getName());
             welcomeScreen.setVisibility(View.GONE);
             editorScroll.setVisibility(View.VISIBLE);
             addTab(f);
             updateCursor();
-            statusLeft.setText("  ⑂ " + (currentProject != null ? currentProject.getName() : "") + "   ● " + f.getName());
+            updateMinimap(content);
+            statusFile.setText("  ⑂ " + (currentProject != null ? currentProject.getName() : ""));
         } catch (Exception e) { toast("Cannot open"); }
     }
 
@@ -1245,7 +1611,6 @@ public class MainActivity extends Activity {
         if (!dirtyFiles.contains(currentFile)) {
             dirtyFiles.add(currentFile);
             addTab(currentFile);
-            statusLeft.setText("  ⑂ " + (currentProject != null ? currentProject.getName() : "") + "   ● " + currentFile.getName());
         }
     }
 
@@ -1266,13 +1631,19 @@ public class MainActivity extends Activity {
             name.setTextColor(act ? TEXT_BRIGHT : TEXT_DIM);
             name.setTextSize(11);
             name.setPadding(15, 14, 10, 14);
-            TextView close = new TextView(this);
+            final TextView close = new TextView(this);
             close.setText("✕");
             close.setTextColor(TEXT_DIM);
             close.setTextSize(11);
             close.setPadding(6, 14, 15, 14);
             name.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { loadFile(f); }
+            });
+            name.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override public boolean onLongClick(View v) {
+                    showTabMenu(f);
+                    return true;
+                }
             });
             close.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
@@ -1293,6 +1664,44 @@ public class MainActivity extends Activity {
         }
     }
 
+    void showTabMenu(final File f) {
+        final String[] opts = {"Close","Close Others","Close All"};
+        new AlertDialog.Builder(this).setTitle(f.getName())
+                .setItems(opts, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) {
+                        if (opts[w].equals("Close")) {
+                            openFiles.remove(f);
+                            dirtyFiles.remove(f);
+                            unsavedChanges.remove(f.getAbsolutePath());
+                            if (f.equals(currentFile)) {
+                                currentFile = null;
+                                codeEditor.setText("");
+                                welcomeScreen.setVisibility(View.VISIBLE);
+                                editorScroll.setVisibility(View.GONE);
+                                breadcrumbText.setText("");
+                            }
+                            addTab(null);
+                        } else if (opts[w].equals("Close Others")) {
+                            ArrayList<File> keep = new ArrayList<File>();
+                            keep.add(f);
+                            openFiles = keep;
+                            if (!f.equals(currentFile)) loadFile(f);
+                            addTab(f);
+                        } else {
+                            openFiles.clear();
+                            dirtyFiles.clear();
+                            unsavedChanges.clear();
+                            currentFile = null;
+                            codeEditor.setText("");
+                            welcomeScreen.setVisibility(View.VISIBLE);
+                            editorScroll.setVisibility(View.GONE);
+                            breadcrumbText.setText("");
+                            addTab(null);
+                        }
+                    }
+                }).show();
+    }
+
     // ========== PROJECTS ==========
     void createProject() {
         final EditText in = new EditText(this);
@@ -1301,7 +1710,7 @@ public class MainActivity extends Activity {
                 .setPositiveButton("Create", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
                         String n = in.getText().toString().trim();
-                        if (n.isEmpty()) return;
+                        if (n.isEmpty()) { toast("Enter a name"); return; }
                         try {
                             genProject(n);
                             currentProject = new File(projectsDir, n.replaceAll("[^A-Za-z0-9_]", ""));
@@ -1314,8 +1723,8 @@ public class MainActivity extends Activity {
 
     void showContextMenu(final File f, final boolean isDir) {
         final String[] opts = isDir
-                ? new String[]{"New File", "New Folder", "Rename", "Delete"}
-                : new String[]{"Open", "Rename", "Delete"};
+                ? new String[]{"New File","New Folder","Rename","Delete"}
+                : new String[]{"Open","Rename","Delete"};
         new AlertDialog.Builder(this).setTitle(f.getName())
                 .setItems(opts, new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
@@ -1346,8 +1755,7 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("New Folder").setView(in)
                 .setPositiveButton("Create", new DialogInterface.OnClickListener() {
                     @Override public void onClick(DialogInterface d, int w) {
-                        new File(p, in.getText().toString()).mkdirs();
-                        selectActivity(0);
+                        new File(p, in.getText().toString()).mkdirs(); selectActivity(0);
                     }
                 }).setNegativeButton("Cancel", null).show();
     }
@@ -1373,7 +1781,7 @@ public class MainActivity extends Activity {
                 }).setNegativeButton("Cancel", null).show();
     }
 
-    // ========== EDITOR FEATURES ==========
+    // ========== SYNTAX & CURSOR ==========
     void updateLineNumbers(String text) {
         int lines = 1;
         for (int i = 0; i < text.length(); i++) if (text.charAt(i) == '\n') lines++;
@@ -1406,6 +1814,7 @@ public class MainActivity extends Activity {
         while (m.find()) e.setSpan(new ForegroundColorSpan(NUMBER_CLR), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         m = Pattern.compile("@\\w+").matcher(t);
         while (m.find()) e.setSpan(new ForegroundColorSpan(YELLOW), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+
         codeEditor.setSelection(cur);
     }
 
@@ -1416,20 +1825,9 @@ public class MainActivity extends Activity {
         for (int i = 0; i < cur && i < t.length(); i++) {
             if (t.charAt(i) == '\n') { line++; col = 1; } else col++;
         }
-        String lang = "Plain";
-        if (currentFile != null) {
-            String n = currentFile.getName();
-            if (n.endsWith(".java")) lang = "Java";
-            else if (n.endsWith(".xml")) lang = "XML";
-            else if (n.endsWith(".gradle")) lang = "Groovy";
-            else if (n.endsWith(".js")) lang = "JavaScript";
-            else if (n.endsWith(".html")) lang = "HTML";
-            else if (n.endsWith(".json")) lang = "JSON";
-            else if (n.endsWith(".md")) lang = "Markdown";
-        }
         int sel = Math.abs(codeEditor.getSelectionEnd() - cur);
-        String selInfo = sel > 0 ? "  (" + sel + " selected)" : "";
-        statusRight.setText("Ln " + line + ", Col " + col + selInfo + "   UTF-8   LF   " + lang + "   ");
+        String selInfo = sel > 0 ? "  (" + sel + " sel)" : "";
+        statusRight.setText("Ln " + line + ", Col " + col + selInfo + "  ");
     }
 
     // ========== FIND & REPLACE ==========
@@ -1479,9 +1877,7 @@ public class MainActivity extends Activity {
 
     void triggerCloudBuild() {
         if (githubToken.isEmpty() || githubUser.isEmpty() || githubRepo.isEmpty()) {
-            toast("Set GitHub settings first!");
-            selectActivity(4);
-            return;
+            toast("Set GitHub settings first!"); selectActivity(5); return;
         }
         consolePanel.setVisibility(View.VISIBLE);
         setPanelTab(2);
@@ -1519,8 +1915,7 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override public void run() {
                 try {
-                    boolean done = false;
-                    int p = 0;
+                    boolean done = false; int p = 0;
                     while (!done && p < 60) {
                         p++;
                         URL url = new URL("https://api.github.com/repos/" + githubUser + "/"
@@ -1583,8 +1978,7 @@ public class MainActivity extends Activity {
                     if (dir != null && !dir.exists()) dir.mkdirs();
                     File zip = new File(dir, "AladdinIDE-APK.zip");
                     FileOutputStream o = new FileOutputStream(zip);
-                    byte[] buf = new byte[8192];
-                    int n;
+                    byte[] buf = new byte[8192]; int n;
                     while ((n = in.read(buf)) != -1) o.write(buf, 0, n);
                     o.close(); in.close();
                     log("✅ ZIP downloaded");
@@ -1600,21 +1994,17 @@ public class MainActivity extends Activity {
     File extract(File zip, File out) {
         try {
             ZipInputStream z = new ZipInputStream(new FileInputStream(zip));
-            ZipEntry en;
-            File apk = null;
+            ZipEntry en; File apk = null;
             while ((en = z.getNextEntry()) != null) {
                 if (en.getName().endsWith(".apk")) {
                     apk = new File(out, "AladdinIDE-latest.apk");
                     FileOutputStream fo = new FileOutputStream(apk);
-                    byte[] b = new byte[8192];
-                    int n;
+                    byte[] b = new byte[8192]; int n;
                     while ((n = z.read(b)) != -1) fo.write(b, 0, n);
-                    fo.close();
-                    break;
+                    fo.close(); break;
                 }
             }
-            z.close();
-            return apk;
+            z.close(); return apk;
         } catch (Exception e) { return null; }
     }
 
@@ -1627,8 +2017,7 @@ public class MainActivity extends Activity {
                             log("⚠ Allow install for Aladdin IDE");
                             Intent i = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
                             i.setData(Uri.parse("package:" + getPackageName()));
-                            startActivity(i);
-                            return;
+                            startActivity(i); return;
                         }
                     }
                     Uri uri = FileProvider.getUriForFile(MainActivity.this,
@@ -1655,7 +2044,6 @@ public class MainActivity extends Activity {
         File lay = new File(app, "src/main/res/layout");
         File val = new File(app, "src/main/res/values");
         src.mkdirs(); lay.mkdirs(); val.mkdirs();
-
         writeFile(new File(proj, "settings.gradle"),
                 "pluginManagement {\n    repositories {\n        google()\n        mavenCentral()\n        gradlePluginPortal()\n    }\n}\n"
                 + "dependencyResolutionManagement {\n    repositories {\n        google()\n        mavenCentral()\n    }\n}\n"

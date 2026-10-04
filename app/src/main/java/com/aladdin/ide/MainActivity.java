@@ -1,392 +1,439 @@
 package com.aladdin.ide;
 
 import android.app.*;
+import android.graphics.*;
 import android.os.*;
-import android.graphics.Color;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
-import android.content.*;
-import android.net.Uri;
-import android.provider.Settings;
 import android.text.*;
-import android.text.style.BackgroundColorSpan;
-import android.text.style.ForegroundColorSpan;
 import android.view.*;
 import android.widget.*;
-import androidx.core.content.FileProvider;
 import java.io.*;
-import java.net.*;
-import java.text.SimpleDateFormat;
 import java.util.*;
-import java.util.regex.*;
-import java.util.zip.*;
-import org.json.*;
 
 public class MainActivity extends Activity {
 
+    // UI
     LinearLayout root, activityBar, sidebar, sidebarContent, editorArea;
-    LinearLayout tabContainer, consolePanel, mainRow, editorRow;
+    LinearLayout tabContainer, consolePanel, mainRow, editorRow, rightPane;
     ScrollView editorScroll, sidebarScroll;
-    EditText codeEditor;
-    TextView lineNumbers, welcomeScreen, minimap, previewPane;
+    EditText codeEditor, rightEditor;
+    TextView lineNumbers, welcomeScreen, minimap;
     TextView statusLeft, statusRight, statusLang, statusCount;
     TextView tabProblems, tabOutput, tabTerminal, tabDebug, consoleOutput;
     FrameLayout mainFrame;
-    TextView floatingUndo, floatingRedo;
-    int activeBottomTab = 2, activeActivity = 0;
-    boolean zenMode = false, searchCase = false, sidebarVisible = true;
-    boolean showHidden = false, showPreview = false;
+    android.webkit.WebView webPreview;
 
-    File projectsDir, currentProject, currentFile;
-    ArrayList<File> projectList = new ArrayList<File>();
-    ArrayList<File> openFiles = new ArrayList<File>();
-    ArrayList<File> dirtyFiles = new ArrayList<File>();
-    ArrayList<File> recentFiles = new ArrayList<File>();
-    ArrayList<File> recentProjects = new ArrayList<File>();
-    ArrayList<File> collapsedFolders = new ArrayList<File>();
-    ArrayList<Integer> bookmarks = new ArrayList<Integer>();
-    ArrayList<String> searchHistory = new ArrayList<String>();
-    HashMap<String, String> unsavedChanges = new HashMap<String, String>();
-
-    ArrayList<String> undoStack = new ArrayList<String>();
-    ArrayList<Integer> undoPos = new ArrayList<Integer>();
-    ArrayList<String> redoStack = new ArrayList<String>();
-    ArrayList<Integer> redoPos = new ArrayList<Integer>();
-    String lastText = "";
-    boolean recordingUndo = true;
-    long lastEditTime = 0;
+    // MANAGERS
+    EditorManager editorManager;
+    FileManager fileManager;
+    BuildManager buildManager;
 
     Handler autoSaveHandler = new Handler();
     Runnable autoSaveRunnable;
 
-    String githubToken = "", githubUser = "", githubRepo = "";
-    int fontSize = 13;
-    boolean wordWrap = true, autoClose = true, lineNumbersOn = true, minimapOn = false;
-    String currentTheme = "dark", lineEnding = "LF";
-    int accentColor = 0; // 0=blue, 1=purple, 2=green, 3=orange, 4=red, 5=pink
-
-    int BG, SIDEBAR_BG, ACTIVITY_BG, PANEL_BG, TAB_INACTIVE, ACCENT, ACCENT_LIGHT;
-    int TEXT, TEXT_BRIGHT, TEXT_DIM, GREEN, ORANGE, BLUE, COMMENT, YELLOW, NUMBER_CLR, LINE_HL;
-
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        projectsDir = new File(getFilesDir(), "projects");
-        if (!projectsDir.exists()) projectsDir.mkdirs();
+        AppState.projectsDir = new File(getFilesDir(), "projects");
+        if (!AppState.projectsDir.exists()) AppState.projectsDir.mkdirs();
+
         SharedPreferences p = getSharedPreferences("AladdinPrefs", MODE_PRIVATE);
-        githubToken = p.getString("token", "");
-        githubUser = p.getString("user", "");
-        githubRepo = p.getString("repo", "");
-        fontSize = p.getInt("fontSize", 13);
-        wordWrap = p.getBoolean("wordWrap", true);
-        autoClose = p.getBoolean("autoClose", true);
-        lineNumbersOn = p.getBoolean("lineNumbers", true);
-        minimapOn = p.getBoolean("minimap", false);
-        currentTheme = p.getString("theme", "dark");
-        accentColor = p.getInt("accent", 0);
-        lineEnding = p.getString("lineEnding", "LF");
-        sidebarVisible = p.getBoolean("sidebarVisible", true);
-        applyTheme(currentTheme);
+        AppState.githubToken = p.getString("token", "");
+        AppState.githubUser = p.getString("user", "");
+        AppState.githubRepo = p.getString("repo", "");
+        AppState.fontSize = p.getInt("fontSize", 13);
+        AppState.wordWrap = p.getBoolean("wordWrap", true);
+        AppState.autoClose = p.getBoolean("autoClose", true);
+        AppState.lineNumbersOn = p.getBoolean("lineNumbers", true);
+        AppState.minimapOn = p.getBoolean("minimap", false);
+        AppState.themeId = p.getInt("themeId", 0);
+        AppState.accentId = p.getInt("accentId", 0);
+        AppState.lineEnding = p.getString("lineEnding", "LF");
+        AppState.sidebarVisible = p.getBoolean("sidebarVisible", true);
+
+        AppState.applyTheme();
+        AppState.registerTemplates();
         buildUI();
         startAutoSave();
     }
 
-    void applyTheme(String theme) {
-        if (theme.equals("dracula")) {
-            BG=Color.parseColor("#282A36"); SIDEBAR_BG=Color.parseColor("#21222C");
-            ACTIVITY_BG=Color.parseColor("#191A21"); PANEL_BG=Color.parseColor("#343746");
-            TAB_INACTIVE=Color.parseColor("#21222C"); TEXT=Color.parseColor("#F8F8F2");
-            TEXT_BRIGHT=Color.parseColor("#FFFFFF"); TEXT_DIM=Color.parseColor("#6272A4");
-            GREEN=Color.parseColor("#50FA7B"); ORANGE=Color.parseColor("#FFB86C");
-            BLUE=Color.parseColor("#8BE9FD"); COMMENT=Color.parseColor("#6272A4");
-            YELLOW=Color.parseColor("#F1FA8C"); NUMBER_CLR=Color.parseColor("#BD93F9");
-            LINE_HL=Color.parseColor("#44475A");
-        } else if (theme.equals("monokai")) {
-            BG=Color.parseColor("#272822"); SIDEBAR_BG=Color.parseColor("#1E1F1C");
-            ACTIVITY_BG=Color.parseColor("#1E1F1C"); PANEL_BG=Color.parseColor("#3E3D32");
-            TAB_INACTIVE=Color.parseColor("#3E3D32"); TEXT=Color.parseColor("#F8F8F2");
-            TEXT_BRIGHT=Color.parseColor("#FFFFFF"); TEXT_DIM=Color.parseColor("#75715E");
-            GREEN=Color.parseColor("#A6E22E"); ORANGE=Color.parseColor("#E6DB74");
-            BLUE=Color.parseColor("#66D9EF"); COMMENT=Color.parseColor("#75715E");
-            YELLOW=Color.parseColor("#E6DB74"); NUMBER_CLR=Color.parseColor("#AE81FF");
-            LINE_HL=Color.parseColor("#3E3D32");
-        } else if (theme.equals("light")) {
-            BG=Color.parseColor("#FFFFFF"); SIDEBAR_BG=Color.parseColor("#F3F3F3");
-            ACTIVITY_BG=Color.parseColor("#E7E7E7"); PANEL_BG=Color.parseColor("#ECECEC");
-            TAB_INACTIVE=Color.parseColor("#ECECEC"); TEXT=Color.parseColor("#333333");
-            TEXT_BRIGHT=Color.parseColor("#000000"); TEXT_DIM=Color.parseColor("#6C6C6C");
-            GREEN=Color.parseColor("#22863A"); ORANGE=Color.parseColor("#032F62");
-            BLUE=Color.parseColor("#0000FF"); COMMENT=Color.parseColor("#6A737D");
-            YELLOW=Color.parseColor("#795E26"); NUMBER_CLR=Color.parseColor("#098658");
-            LINE_HL=Color.parseColor("#F0F0F0");
-        } else {
-            BG=Color.parseColor("#1E1E1E"); SIDEBAR_BG=Color.parseColor("#252526");
-            ACTIVITY_BG=Color.parseColor("#333333"); PANEL_BG=Color.parseColor("#2D2D2D");
-            TAB_INACTIVE=Color.parseColor("#2D2D2D"); TEXT=Color.parseColor("#CCCCCC");
-            TEXT_BRIGHT=Color.parseColor("#FFFFFF"); TEXT_DIM=Color.parseColor("#858585");
-            GREEN=Color.parseColor("#4EC9B0"); ORANGE=Color.parseColor("#CE9178");
-            BLUE=Color.parseColor("#569CD6"); COMMENT=Color.parseColor("#6A9955");
-            YELLOW=Color.parseColor("#DCDCAA"); NUMBER_CLR=Color.parseColor("#B5CEA8");
-            LINE_HL=Color.parseColor("#2A2D2E");
-        }
-        // Accent color
-        String[] accents = {"#007ACC","#A259FF","#22C55E","#F59E0B","#EF4444","#EC4899"};
-        ACCENT = Color.parseColor(accents[accentColor]);
-        int[] accentsLight = {0xFF1F8AD2,0xFFB678FF,0xFF4ADE80,0xFFFBBF24,0xFFF87171,0xFFF472B6};
-        ACCENT_LIGHT = accentsLight[accentColor];
-    }
-
-    // ========== HELPERS ==========
-    TextView tv(String s, int size) {
-        TextView t = new TextView(this);
-        t.setText(s); t.setTextSize(size); t.setTextColor(TEXT);
-        t.setPadding(18, 12, 18, 12);
-        return t;
-    }
-    TextView iconBtn(String s, int size) {
-        TextView t = new TextView(this);
-        t.setText(s); t.setTextSize(size); t.setTextColor(TEXT_DIM);
-        t.setGravity(Gravity.CENTER); t.setPadding(10, 8, 10, 8);
-        return t;
-    }
-    TextView tipIcon(String icon, int size, final String tip) {
-        final TextView t = iconBtn(icon, size);
-        t.setOnLongClickListener(new View.OnLongClickListener() {
-            @Override public boolean onLongClick(View v) { toast(tip); return true; }
-        });
-        return t;
-    }
-    Button btn(String s) {
-        Button b = new Button(this);
-        b.setText(s); b.setTextColor(TEXT); b.setTextSize(12);
-        b.setAllCaps(false); b.setBackgroundColor(Color.TRANSPARENT);
-        b.setPadding(12, 8, 12, 8);
-        b.setMinWidth(0); b.setMinimumWidth(0);
-        return b;
-    }
-    void toast(String m) { Toast.makeText(this, m, Toast.LENGTH_SHORT).show(); }
-
     void startAutoSave() {
         autoSaveRunnable = new Runnable() {
             @Override public void run() {
-                silentAutoSave();
+                if (AppState.currentFile != null && AppState.dirtyFiles.contains(AppState.currentFile)) {
+                    try {
+                        fileManager.writeFile(AppState.currentFile, codeEditor.getText().toString());
+                        AppState.unsavedChanges.remove(AppState.currentFile.getAbsolutePath());
+                        AppState.dirtyFiles.remove(AppState.currentFile);
+                        fileManager.addTab(AppState.currentFile);
+                    } catch (Exception e) {}
+                }
                 autoSaveHandler.postDelayed(this, 30000);
             }
         };
         autoSaveHandler.postDelayed(autoSaveRunnable, 30000);
     }
-    void silentAutoSave() {
-        if (currentFile != null && dirtyFiles.contains(currentFile)) {
-            try {
-                writeFile(currentFile, codeEditor.getText().toString());
-                unsavedChanges.remove(currentFile.getAbsolutePath());
-                dirtyFiles.remove(currentFile);
-                addTab(currentFile);
-            } catch (Exception e) {}
-        }
-    }
+
     @Override protected void onDestroy() {
         autoSaveHandler.removeCallbacks(autoSaveRunnable);
         super.onDestroy();
     }
 
-    // ========== MAIN UI ==========
     void buildUI() {
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(BG);
+        root.setBackgroundColor(AppState.BG);
 
         // TITLE BAR
         LinearLayout titleBar = new LinearLayout(this);
         titleBar.setGravity(Gravity.CENTER_VERTICAL);
-        titleBar.setBackgroundColor(SIDEBAR_BG);
+        titleBar.setBackgroundColor(AppState.SIDEBAR_BG);
         titleBar.setElevation(4);
 
-        TextView menuIcon = tipIcon("☰", 20, "Menu");
+        TextView menuIcon = UIHelper.tipIcon(this, "☰", 20, "Menu");
         menuIcon.setPadding(15, 12, 12, 12);
         menuIcon.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showCustomMenu(); }
+            @Override public void onClick(View v) { MenuManager.showCustomMenu(MainActivity.this, fileManager, editorManager, buildManager, sidebarContent, tabContainer); }
         });
         titleBar.addView(menuIcon);
 
-        TextView brand = tv("⚡ Aladdin", 14);
+        TextView brand = UIHelper.tv(this, "⚡ Aladdin", 14);
         brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        brand.setTextColor(ACCENT);
+        brand.setTextColor(AppState.ACCENT);
         brand.setPadding(4, 12, 8, 12);
         titleBar.addView(brand);
 
         View sp1 = new View(this);
         titleBar.addView(sp1, new LinearLayout.LayoutParams(0, 1, 1));
 
-        TextView undoBtn = tipIcon("↶", 18, "Undo");
+        TextView undoBtn = UIHelper.tipIcon(this, "↶", 18, "Undo");
         undoBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { performUndo(); }
+            @Override public void onClick(View v) { editorManager.performUndo(); }
         });
         titleBar.addView(undoBtn);
-
-        TextView redoBtn = tipIcon("↷", 18, "Redo");
+        TextView redoBtn = UIHelper.tipIcon(this, "↷", 18, "Redo");
         redoBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { performRedo(); }
+            @Override public void onClick(View v) { editorManager.performRedo(); }
         });
         titleBar.addView(redoBtn);
-
-        TextView fmtBtn = tipIcon("≡", 18, "Format code");
+        TextView fmtBtn = UIHelper.tipIcon(this, "≡", 18, "Format code");
         fmtBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { formatDocument(); }
+            @Override public void onClick(View v) { editorManager.formatDocument(); }
         });
         titleBar.addView(fmtBtn);
-
-        TextView cmdBtn = tipIcon("⌘", 18, "Command Palette");
-        cmdBtn.setTextColor(ACCENT);
+        TextView cmdBtn = UIHelper.tipIcon(this, "⌘", 18, "Command Palette");
+        cmdBtn.setTextColor(AppState.ACCENT);
         cmdBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showCommandPalette(); }
+            @Override public void onClick(View v) { MenuManager.showCommandPalette(MainActivity.this, fileManager, editorManager, buildManager, sidebarContent, tabContainer); }
         });
         titleBar.addView(cmdBtn);
-
-        TextView runBtn = tipIcon("▶", 16, "Run Cloud Build");
-        runBtn.setTextColor(ACCENT);
+        TextView runBtn = UIHelper.tipIcon(this, "▶", 16, "Run Cloud Build");
+        runBtn.setTextColor(AppState.ACCENT);
         runBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                if (currentProject == null) { toast("Open a project first"); return; }
-                triggerCloudBuild();
+                if (AppState.currentProject == null) { UIHelper.toast(MainActivity.this, "Open a project first"); return; }
+                consolePanel.setVisibility(View.VISIBLE);
+                buildManager.triggerCloudBuild();
             }
         });
         titleBar.addView(runBtn);
+        root.addView(titleBar);
 
-        root.addView(titleBar, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
-        // MAIN FRAME (holds main row + floating buttons)
         mainFrame = new FrameLayout(this);
         mainFrame.setLayoutParams(new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
         mainRow = new LinearLayout(this);
         mainRow.setOrientation(LinearLayout.HORIZONTAL);
         mainRow.setLayoutParams(new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         // ACTIVITY BAR
         activityBar = new LinearLayout(this);
         activityBar.setOrientation(LinearLayout.VERTICAL);
-        activityBar.setBackgroundColor(ACTIVITY_BG);
+        activityBar.setBackgroundColor(AppState.ACTIVITY_BG);
         activityBar.setPadding(0, 4, 0, 4);
         activityBar.addView(activityIcon("📁", 0, "Explorer"));
         activityBar.addView(activityIcon("🔍", 1, "Search"));
-        activityBar.addView(activityIcon("⑂", 2, "Source Control"));
-        activityBar.addView(activityIcon("📦", 3, "Snippets"));
-        activityBar.addView(activityIcon("🧠", 4, "Outline"));
-        activityBar.addView(activityIcon("⚙", 5, "Settings"));
+        activityBar.addView(activityIcon("🌐", 2, "Web Dev"));
+        activityBar.addView(activityIcon("🎮", 3, "Game Dev"));
+        activityBar.addView(activityIcon("📦", 4, "Snippets"));
+        activityBar.addView(activityIcon("🧠", 5, "Outline"));
+        activityBar.addView(activityIcon("🐛", 6, "Diagnostics"));
+        activityBar.addView(activityIcon("⚙", 7, "Settings"));
         View sp2 = new View(this);
         activityBar.addView(sp2, new LinearLayout.LayoutParams(1, 0, 1));
-        mainRow.addView(activityBar, new LinearLayout.LayoutParams(50,
-                LinearLayout.LayoutParams.MATCH_PARENT));
+        mainRow.addView(activityBar, new LinearLayout.LayoutParams(48,
+            LinearLayout.LayoutParams.MATCH_PARENT));
 
         // SIDEBAR
         sidebar = new LinearLayout(this);
         sidebar.setOrientation(LinearLayout.VERTICAL);
-        sidebar.setBackgroundColor(SIDEBAR_BG);
+        sidebar.setBackgroundColor(AppState.SIDEBAR_BG);
         sidebarScroll = new ScrollView(this);
         sidebarContent = new LinearLayout(this);
         sidebarContent.setOrientation(LinearLayout.VERTICAL);
         sidebarScroll.addView(sidebarContent);
         sidebar.addView(sidebarScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-        sidebar.setVisibility(sidebarVisible ? View.VISIBLE : View.GONE);
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        sidebar.setVisibility(AppState.sidebarVisible ? View.VISIBLE : View.GONE);
         sidebar.setLayoutParams(new LinearLayout.LayoutParams(
-                sidebarVisible ? 230 : 0, LinearLayout.LayoutParams.MATCH_PARENT));
+            AppState.sidebarVisible ? 210 : 0, LinearLayout.LayoutParams.MATCH_PARENT));
         mainRow.addView(sidebar);
 
-        // EDITOR AREA
+        // EDITOR
         editorArea = new LinearLayout(this);
         editorArea.setOrientation(LinearLayout.VERTICAL);
-        editorArea.setBackgroundColor(BG);
-        editorArea.setLayoutParams(new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        editorArea.setBackgroundColor(AppState.BG);
+        editorArea.setLayoutParams(new LinearLayout.LayoutParams(0,
+            LinearLayout.LayoutParams.MATCH_PARENT, 1));
 
         HorizontalScrollView tabScroll = new HorizontalScrollView(this);
-        tabScroll.setBackgroundColor(PANEL_BG);
+        tabScroll.setBackgroundColor(AppState.PANEL_BG);
         tabContainer = new LinearLayout(this);
         tabContainer.setOrientation(LinearLayout.HORIZONTAL);
         tabScroll.addView(tabContainer);
         editorArea.addView(tabScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 36));
+            LinearLayout.LayoutParams.MATCH_PARENT, 34));
 
         welcomeScreen = new TextView(this);
-        welcomeScreen.setText("\n\n\n⚡  ALADDIN IDE  v8.0\n\n" +
-                "─  Ultra Edition  ─\n\n\n" +
-                "  25 New Features:\n" +
-                "  🎯  Current line highlight\n" +
-                "  🌈  Rainbow brackets\n" +
-                "  📑  Bookmarks\n" +
-                "  ✏  Move / duplicate lines\n" +
-                "  👁  XML preview\n" +
-                "  🎨  Accent colors\n\n" +
-                "Tap 📁 to open sidebar\n" +
-                "Tap 📁 again to collapse");
-        welcomeScreen.setTextColor(TEXT_DIM);
-        welcomeScreen.setTextSize(13);
+        welcomeScreen.setText("\n\n⚡  ALADDIN IDE  v10.0\n\n─  Modular Edition  ─\n\n" +
+            "6-File Architecture:\n" +
+            "📄  MainActivity.java\n" +
+            "🎨  UIHelper.java\n" +
+            "🧠  EditorManager.java\n" +
+            "📁  FileManager.java\n" +
+            "⚡  BuildManager.java\n" +
+            "🎛  PanelManager + MenuManager\n\n" +
+            "Everything from v9.0 still works!");
+        welcomeScreen.setTextColor(AppState.TEXT_DIM);
+        welcomeScreen.setTextSize(12);
         welcomeScreen.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
         welcomeScreen.setLineSpacing(4, 1);
-        welcomeScreen.setPadding(20, 30, 20, 20);
+        welcomeScreen.setPadding(20, 20, 20, 20);
         editorArea.addView(welcomeScreen, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
 
         editorRow = new LinearLayout(this);
         editorRow.setOrientation(LinearLayout.HORIZONTAL);
 
         lineNumbers = new TextView(this);
-        lineNumbers.setTextColor(TEXT_DIM);
-        lineNumbers.setTextSize(fontSize);
+        lineNumbers.setTextColor(AppState.TEXT_DIM);
+        lineNumbers.setTextSize(AppState.fontSize);
         lineNumbers.setTypeface(Typeface.MONOSPACE);
         lineNumbers.setPadding(8, 12, 8, 12);
         lineNumbers.setGravity(Gravity.TOP | Gravity.RIGHT);
-        lineNumbers.setBackgroundColor(BG);
+        lineNumbers.setBackgroundColor(AppState.BG);
         lineNumbers.setMinWidth(45);
-        lineNumbers.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { toggleBookmark(); }
-        });
 
         codeEditor = new EditText(this);
-        codeEditor.setTextColor(TEXT);
-        codeEditor.setTextSize(fontSize);
+        codeEditor.setTextColor(AppState.TEXT);
+        codeEditor.setTextSize(AppState.fontSize);
         codeEditor.setTypeface(Typeface.MONOSPACE);
         codeEditor.setGravity(Gravity.TOP | Gravity.LEFT);
         codeEditor.setSingleLine(false);
-        codeEditor.setBackgroundColor(BG);
+        codeEditor.setBackgroundColor(AppState.BG);
         codeEditor.setPadding(10, 12, 10, 12);
-        codeEditor.setHorizontallyScrolling(!wordWrap);
+        codeEditor.setHorizontallyScrolling(!AppState.wordWrap);
         codeEditor.setInputType(InputType.TYPE_CLASS_TEXT
-                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+            | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
 
+        minimap = new TextView(this);
+        minimap.setTextSize(2); minimap.setTextColor(AppState.TEXT_DIM);
+        minimap.setTypeface(Typeface.MONOSPACE);
+        minimap.setBackgroundColor(AppState.SIDEBAR_BG);
+        minimap.setPadding(3, 8, 3, 8);
+        minimap.setGravity(Gravity.TOP); minimap.setMaxLines(80);
+        minimap.setVisibility(View.GONE);
+
+        // Create managers
+        editorManager = new EditorManager(this, codeEditor, lineNumbers, minimap, null, null);
+        fileManager = new FileManager(this, sidebarContent, tabContainer, editorManager);
+
+        editorRow.addView(lineNumbers, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        editorRow.addView(codeEditor, new LinearLayout.LayoutParams(0,
+            LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        editorRow.addView(minimap, new LinearLayout.LayoutParams(50,
+            LinearLayout.LayoutParams.MATCH_PARENT));
+
+        editorScroll = new ScrollView(this);
+        editorScroll.addView(editorRow);
+        editorScroll.setVisibility(View.GONE);
+
+        rightPane = new LinearLayout(this);
+        rightPane.setOrientation(LinearLayout.VERTICAL);
+        rightPane.setVisibility(View.GONE);
+        rightEditor = new EditText(this);
+        rightEditor.setTextColor(AppState.TEXT);
+        rightEditor.setTextSize(AppState.fontSize);
+        rightEditor.setTypeface(Typeface.MONOSPACE);
+        rightEditor.setBackgroundColor(AppState.BG);
+        rightEditor.setPadding(10, 12, 10, 12);
+        rightPane.addView(rightEditor, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        webPreview = new android.webkit.WebView(this);
+        webPreview.getSettings().setJavaScriptEnabled(true);
+        webPreview.setVisibility(View.GONE);
+        rightPane.addView(webPreview, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+
+        LinearLayout pair = new LinearLayout(this);
+        pair.setOrientation(LinearLayout.HORIZONTAL);
+        pair.addView(editorScroll, new LinearLayout.LayoutParams(0,
+            LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        pair.addView(rightPane, new LinearLayout.LayoutParams(0,
+            LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        editorArea.addView(pair, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+
+        mainRow.addView(editorArea);
+        mainFrame.addView(mainRow);
+
+        // FLOATING BUTTONS
+        LinearLayout floatBtns = new LinearLayout(this);
+        floatBtns.setOrientation(LinearLayout.VERTICAL);
+        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        flp.gravity = Gravity.BOTTOM | Gravity.RIGHT;
+        flp.setMargins(0, 0, 15, 15);
+        floatBtns.setLayoutParams(flp);
+        TextView fabUndo = UIHelper.createFloatingButton(this, "↶", AppState.ACCENT);
+        fabUndo.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { editorManager.performUndo(); }
+        });
+        floatBtns.addView(fabUndo);
+        TextView fabRedo = UIHelper.createFloatingButton(this, "↷", AppState.ACCENT);
+        LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        fp.topMargin = 8;
+        fabRedo.setLayoutParams(fp);
+        fabRedo.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { editorManager.performRedo(); }
+        });
+        floatBtns.addView(fabRedo);
+        TextView fabSave = UIHelper.createFloatingButton(this, "💾", AppState.GREEN);
+        fabSave.setLayoutParams(fp);
+        fabSave.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { fileManager.saveCurrentFile(); }
+        });
+        floatBtns.addView(fabSave);
+        mainFrame.addView(floatBtns);
+        root.addView(mainFrame);
+
+        // BOTTOM PANEL
+        consolePanel = new LinearLayout(this);
+        consolePanel.setOrientation(LinearLayout.VERTICAL);
+        consolePanel.setBackgroundColor(0xFF181818);
+        consolePanel.setVisibility(View.GONE);
+        LinearLayout panelTabs = new LinearLayout(this);
+        panelTabs.setBackgroundColor(AppState.SIDEBAR_BG);
+        tabProblems = UIHelper.tv(this, "  PROBLEMS", 10);
+        tabProblems.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { setPanelTab(0); }
+        });
+        panelTabs.addView(tabProblems);
+        tabOutput = UIHelper.tv(this, "  OUTPUT", 10);
+        tabOutput.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { setPanelTab(1); }
+        });
+        panelTabs.addView(tabOutput);
+        tabTerminal = UIHelper.tv(this, "  TERMINAL", 10);
+        tabTerminal.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { setPanelTab(2); }
+        });
+        panelTabs.addView(tabTerminal);
+        tabDebug = UIHelper.tv(this, "  DEBUG", 10);
+        tabDebug.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { setPanelTab(3); }
+        });
+        panelTabs.addView(tabDebug);
+        View sp3 = new View(this);
+        panelTabs.addView(sp3, new LinearLayout.LayoutParams(0, 1, 1));
+        TextView closeP = UIHelper.iconBtn(this, "✕", 13);
+        closeP.setPadding(15, 10, 15, 10);
+        closeP.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { consolePanel.setVisibility(View.GONE); }
+        });
+        panelTabs.addView(closeP);
+        consolePanel.addView(panelTabs, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 34));
+        ScrollView consoleScroll = new ScrollView(this);
+        consoleOutput = new TextView(this);
+        consoleOutput.setTextColor(AppState.GREEN);
+        consoleOutput.setTextSize(11);
+        consoleOutput.setTypeface(Typeface.MONOSPACE);
+        consoleOutput.setPadding(15, 12, 15, 12);
+        consoleScroll.addView(consoleOutput);
+        consolePanel.addView(consoleScroll, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 160));
+        root.addView(consolePanel);
+
+        // STATUS BAR
+        LinearLayout statusBar = new LinearLayout(this);
+        statusBar.setOrientation(LinearLayout.HORIZONTAL);
+        statusBar.setBackgroundColor(AppState.ACCENT);
+        statusBar.setGravity(Gravity.CENTER_VERTICAL);
+        statusLeft = UIHelper.tv(this, "⑂ main", 10);
+        statusLeft.setTextColor(Color.WHITE);
+        statusLeft.setPadding(12, 6, 8, 6);
+        statusBar.addView(statusLeft);
+        View sp4 = new View(this);
+        statusBar.addView(sp4, new LinearLayout.LayoutParams(0, 1, 1));
+        statusCount = UIHelper.tv(this, "", 10);
+        statusCount.setTextColor(Color.WHITE);
+        statusCount.setPadding(8, 6, 8, 6);
+        statusBar.addView(statusCount);
+        statusRight = UIHelper.tv(this, "Ln 1, Col 1", 10);
+        statusRight.setTextColor(Color.WHITE);
+        statusRight.setPadding(8, 6, 8, 6);
+        statusBar.addView(statusRight);
+        statusLang = UIHelper.tv(this, "Java", 10);
+        statusLang.setTextColor(Color.WHITE);
+        statusLang.setPadding(8, 6, 8, 6);
+        statusBar.addView(statusLang);
+        TextView ending = UIHelper.tv(this, AppState.lineEnding, 10);
+        ending.setTextColor(Color.WHITE);
+        ending.setPadding(8, 6, 12, 6);
+        statusBar.addView(ending);
+        root.addView(statusBar);
+
+        // Rebuild managers with status text views
+        editorManager = new EditorManager(this, codeEditor, lineNumbers, minimap, statusRight, statusCount);
+        fileManager = new FileManager(this, sidebarContent, tabContainer, editorManager);
+        buildManager = new BuildManager(this, consoleOutput);
+
+        // Editor listeners
         codeEditor.addTextChangedListener(new TextWatcher() {
             boolean self = false;
             @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {
-                if (recordingUndo) {
+                if (AppState.recordingUndo) {
                     String now = s.toString();
-                    if (!now.equals(lastText)) {
+                    if (!now.equals(AppState.lastText)) {
                         long t = System.currentTimeMillis();
-                        if (t - lastEditTime > 1500) {
-                            undoStack.add(lastText);
-                            undoPos.add(codeEditor.getSelectionStart());
-                            if (undoStack.size() > 50) { undoStack.remove(0); undoPos.remove(0); }
-                            redoStack.clear(); redoPos.clear();
+                        if (t - AppState.lastEditTime > 1500) {
+                            AppState.undoStack.add(AppState.lastText);
+                            AppState.undoPos.add(codeEditor.getSelectionStart());
+                            if (AppState.undoStack.size() > 50) {
+                                AppState.undoStack.remove(0);
+                                AppState.undoPos.remove(0);
+                            }
+                            AppState.redoStack.clear(); AppState.redoPos.clear();
                         }
-                        lastEditTime = t; lastText = now;
+                        AppState.lastEditTime = t; AppState.lastText = now;
                     }
                 }
             }
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) {
-                if (self || !autoClose) return;
+                if (self || !AppState.autoClose) return;
                 if (c > b && st + c <= s.length()) {
-                    char a = s.charAt(st + c - 1);
+                    char ch = s.charAt(st + c - 1);
                     String close = null;
-                    if (a == '{') close = "}";
-                    else if (a == '[') close = "]";
-                    else if (a == '(') close = ")";
-                    else if (a == '"') close = "\"";
-                    else if (a == '\'') close = "'";
+                    if (ch == '{') close = "}";
+                    else if (ch == '[') close = "]";
+                    else if (ch == '(') close = ")";
+                    else if (ch == '"') close = "\"";
+                    else if (ch == '\'') close = "'";
                     if (close != null) {
                         self = true;
                         int cur = codeEditor.getSelectionStart();
@@ -397,19 +444,14 @@ public class MainActivity extends Activity {
                 }
             }
             @Override public void afterTextChanged(Editable s) {
-                if (lineNumbersOn) updateLineNumbers(s.toString());
-                highlight(s);
-                updateCursor();
-                updateCount(s.toString());
-                if (minimapOn) updateMinimap(s.toString());
-                markDirty();
+                if (AppState.lineNumbersOn) editorManager.updateLineNumbers(s.toString());
+                editorManager.highlight(s);
+                editorManager.updateCursor();
+                editorManager.updateCount(s.toString());
+                if (AppState.minimapOn) editorManager.updateMinimap(s.toString());
+                fileManager.markDirty();
             }
         });
-
-        codeEditor.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { updateCursor(); updateLineHighlight(); }
-        });
-
         codeEditor.setOnKeyListener(new View.OnKeyListener() {
             @Override public boolean onKey(View v, int keyCode, KeyEvent e) {
                 if (e.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_ENTER) {
@@ -423,2155 +465,95 @@ public class MainActivity extends Activity {
                 return false;
             }
         });
-
         codeEditor.setOnScrollChangeListener(new View.OnScrollChangeListener() {
             @Override public void onScrollChange(View v, int sx, int sy, int osx, int osy) {
                 lineNumbers.scrollTo(0, sy);
             }
         });
 
-        editorRow.addView(lineNumbers, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        editorRow.addView(codeEditor, new LinearLayout.LayoutParams(
-                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        minimap = new TextView(this);
-        minimap.setTextSize(2); minimap.setTextColor(TEXT_DIM);
-        minimap.setTypeface(Typeface.MONOSPACE);
-        minimap.setBackgroundColor(SIDEBAR_BG);
-        minimap.setPadding(3, 8, 3, 8);
-        minimap.setGravity(Gravity.TOP); minimap.setMaxLines(80);
-        minimap.setVisibility(View.GONE);
-        editorRow.addView(minimap, new LinearLayout.LayoutParams(50,
-                LinearLayout.LayoutParams.MATCH_PARENT));
-
-        editorScroll = new ScrollView(this);
-        editorScroll.addView(editorRow);
-        editorScroll.setVisibility(View.GONE);
-        editorArea.addView(editorScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-
-        previewPane = new TextView(this);
-        previewPane.setTextColor(TEXT);
-        previewPane.setTextSize(13);
-        previewPane.setBackgroundColor(PANEL_BG);
-        previewPane.setPadding(20, 15, 20, 15);
-        previewPane.setVisibility(View.GONE);
-        editorArea.addView(previewPane, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-
-        mainRow.addView(editorArea);
-        mainFrame.addView(mainRow);
-
-        // FLOATING UNDO/REDO BUTTONS
-        LinearLayout floatBtns = new LinearLayout(this);
-        floatBtns.setOrientation(LinearLayout.VERTICAL);
-        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        flp.gravity = Gravity.BOTTOM | Gravity.RIGHT;
-        flp.setMargins(0, 0, 15, 15);
-        floatBtns.setLayoutParams(flp);
-
-        floatingUndo = createFloatingButton("↶");
-        floatingUndo.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { performUndo(); }
-        });
-        floatBtns.addView(floatingUndo);
-        floatingRedo = createFloatingButton("↷");
-        floatingRedo.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { performRedo(); }
-        });
-        LinearLayout.LayoutParams fbp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        fbp.topMargin = 8;
-        floatingRedo.setLayoutParams(fbp);
-        floatBtns.addView(floatingRedo);
-        mainFrame.addView(floatBtns);
-
-        root.addView(mainFrame);
-
-        // BOTTOM PANEL
-        consolePanel = new LinearLayout(this);
-        consolePanel.setOrientation(LinearLayout.VERTICAL);
-        consolePanel.setBackgroundColor(Color.parseColor("#181818"));
-        consolePanel.setVisibility(View.GONE);
-        LinearLayout panelTabs = new LinearLayout(this);
-        panelTabs.setBackgroundColor(SIDEBAR_BG);
-        tabProblems = tv("  PROBLEMS", 10);
-        tabProblems.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { setPanelTab(0); }
-        });
-        panelTabs.addView(tabProblems);
-        tabOutput = tv("  OUTPUT", 10);
-        tabOutput.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { setPanelTab(1); }
-        });
-        panelTabs.addView(tabOutput);
-        tabTerminal = tv("  TERMINAL", 10);
-        tabTerminal.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { setPanelTab(2); }
-        });
-        panelTabs.addView(tabTerminal);
-        tabDebug = tv("  DEBUG", 10);
-        tabDebug.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { setPanelTab(3); }
-        });
-        panelTabs.addView(tabDebug);
-        View sp3 = new View(this);
-        panelTabs.addView(sp3, new LinearLayout.LayoutParams(0, 1, 1));
-        TextView closeP = iconBtn("✕", 13);
-        closeP.setPadding(15, 10, 15, 10);
-        closeP.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { consolePanel.setVisibility(View.GONE); }
-        });
-        panelTabs.addView(closeP);
-        consolePanel.addView(panelTabs, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 34));
-        ScrollView consoleScroll = new ScrollView(this);
-        consoleOutput = new TextView(this);
-        consoleOutput.setTextColor(GREEN);
-        consoleOutput.setTextSize(11);
-        consoleOutput.setTypeface(Typeface.MONOSPACE);
-        consoleOutput.setPadding(15, 12, 15, 12);
-        consoleScroll.addView(consoleOutput);
-        consolePanel.addView(consoleScroll, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 180));
-        root.addView(consolePanel);
-
-        // STATUS BAR
-        LinearLayout statusBar = new LinearLayout(this);
-        statusBar.setOrientation(LinearLayout.HORIZONTAL);
-        statusBar.setBackgroundColor(ACCENT);
-        statusBar.setGravity(Gravity.CENTER_VERTICAL);
-
-        statusLeft = tv("⑂ main", 10);
-        statusLeft.setTextColor(Color.WHITE);
-        statusLeft.setPadding(12, 6, 8, 6);
-        statusBar.addView(statusLeft);
-
-        View sp4 = new View(this);
-        statusBar.addView(sp4, new LinearLayout.LayoutParams(0, 1, 1));
-
-        statusCount = tv("", 10);
-        statusCount.setTextColor(Color.WHITE);
-        statusCount.setPadding(8, 6, 8, 6);
-        statusBar.addView(statusCount);
-
-        statusRight = tv("Ln 1, Col 1", 10);
-        statusRight.setTextColor(Color.WHITE);
-        statusRight.setPadding(8, 6, 8, 6);
-        statusRight.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showGotoLine(); }
-        });
-        statusBar.addView(statusRight);
-
-        statusLang = tv("Java", 10);
-        statusLang.setTextColor(Color.WHITE);
-        statusLang.setPadding(8, 6, 8, 6);
-        statusLang.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showLanguagePicker(); }
-        });
-        statusBar.addView(statusLang);
-
-        TextView statusEnding = tv(lineEnding, 10);
-        statusEnding.setTextColor(Color.WHITE);
-        statusEnding.setPadding(8, 6, 12, 6);
-        statusEnding.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                lineEnding = lineEnding.equals("LF") ? "CRLF" : "LF";
-                getSharedPreferences("AladdinPrefs", MODE_PRIVATE).edit().putString("lineEnding", lineEnding).apply();
-                toast("Line ending: " + lineEnding);
-            }
-        });
-        statusBar.addView(statusEnding);
-
-        root.addView(statusBar, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-
         setContentView(root);
-        selectActivity(0);
+        refreshLayout();
         setPanelTab(2);
     }
 
-    TextView createFloatingButton(String icon) {
-        TextView t = new TextView(this);
-        t.setText(icon);
-        t.setTextSize(20);
-        t.setTextColor(Color.WHITE);
-        t.setGravity(Gravity.CENTER);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(ACCENT);
-        bg.setStroke(2, SIDEBAR_BG);
-        t.setBackground(bg);
-        t.setWidth(110);
-        t.setHeight(110);
-        t.setElevation(8);
-        return t;
-    }
-
-    // ========== ACTIVITY BAR ==========
     TextView activityIcon(String icon, final int index, final String tip) {
         final TextView t = new TextView(this);
-        t.setText(icon); t.setTextSize(20);
+        t.setText(icon); t.setTextSize(19);
         t.setGravity(Gravity.CENTER);
-        t.setPadding(6, 14, 6, 14);
-        t.setTextColor(index == activeActivity && sidebarVisible ? TEXT_BRIGHT : TEXT_DIM);
+        t.setPadding(4, 12, 4, 12);
+        t.setTextColor(index == AppState.activeActivity && AppState.sidebarVisible
+            ? AppState.TEXT_BRIGHT : AppState.TEXT_DIM);
         t.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
-                if (activeActivity == index && sidebarVisible) {
-                    sidebarVisible = false;
-                } else {
-                    activeActivity = index; sidebarVisible = true;
-                }
-                getSharedPreferences("AladdinPrefs", MODE_PRIVATE)
-                        .edit().putBoolean("sidebarVisible", sidebarVisible).apply();
+                if (AppState.activeActivity == index && AppState.sidebarVisible)
+                    AppState.sidebarVisible = false;
+                else { AppState.activeActivity = index; AppState.sidebarVisible = true; }
                 refreshLayout();
             }
         });
         t.setOnLongClickListener(new View.OnLongClickListener() {
-            @Override public boolean onLongClick(View v) { toast(tip); return true; }
+            @Override public boolean onLongClick(View v) { UIHelper.toast(MainActivity.this, tip); return true; }
         });
         return t;
     }
 
     void refreshLayout() {
-        String[] icons = {"📁","🔍","⑂","📦","🧠","⚙"};
+        String[] icons = {"📁","🔍","🌐","🎮","📦","🧠","🐛","⚙"};
         for (int i = 0; i < activityBar.getChildCount(); i++) {
             View c = activityBar.getChildAt(i);
             if (c instanceof TextView) {
                 TextView t = (TextView) c;
-                String s = t.getText().toString();
                 for (int j = 0; j < icons.length; j++) {
-                    if (s.equals(icons[j])) {
-                        boolean active = (j == activeActivity) && sidebarVisible;
-                        t.setTextColor(active ? TEXT_BRIGHT : TEXT_DIM);
-                        t.setBackgroundColor(active ? SIDEBAR_BG : Color.TRANSPARENT);
+                    if (t.getText().toString().equals(icons[j])) {
+                        boolean active = (j == AppState.activeActivity) && AppState.sidebarVisible;
+                        t.setTextColor(active ? AppState.TEXT_BRIGHT : AppState.TEXT_DIM);
+                        t.setBackgroundColor(active ? AppState.SIDEBAR_BG : 0);
                     }
                 }
             }
         }
-        if (sidebarVisible) {
+        if (AppState.sidebarVisible) {
             sidebar.setVisibility(View.VISIBLE);
-            sidebar.setLayoutParams(new LinearLayout.LayoutParams(230,
-                    LinearLayout.LayoutParams.MATCH_PARENT));
-            sidebarContent.removeAllViews();
-            if (activeActivity == 0) buildExplorerPanel();
-            else if (activeActivity == 1) buildSearchPanel();
-            else if (activeActivity == 2) buildSourcePanel();
-            else if (activeActivity == 3) buildSnippetsPanel();
-            else if (activeActivity == 4) buildOutlinePanel();
-            else buildSettingsPanel();
+            sidebar.setLayoutParams(new LinearLayout.LayoutParams(210,
+                LinearLayout.LayoutParams.MATCH_PARENT));
+            PanelManager.buildPanel(this, sidebarContent, fileManager, editorManager,
+                buildManager, tabContainer, AppState.activeActivity);
         } else {
             sidebar.setVisibility(View.GONE);
             sidebar.setLayoutParams(new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.MATCH_PARENT));
+                LinearLayout.LayoutParams.MATCH_PARENT));
         }
     }
 
-    void selectActivity(int index) {
-        activeActivity = index; sidebarVisible = true;
-        getSharedPreferences("AladdinPrefs", MODE_PRIVATE)
-                .edit().putBoolean("sidebarVisible", sidebarVisible).apply();
-        refreshLayout();
-    }
-
-    // ========== CUSTOM MENU WITH X ==========
-    void showCustomMenu() {
-        final Dialog dialog = new Dialog(this);
-        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-        dialog.setContentView(buildMenuContent(dialog));
-        Window w = dialog.getWindow();
-        if (w != null) {
-            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(PANEL_BG));
-        }
-        dialog.show();
-    }
-
-    LinearLayout buildMenuContent(final Dialog dialog) {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setBackgroundColor(PANEL_BG);
-        layout.setPadding(20, 20, 20, 20);
-
-        // Header with X
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(0, 0, 0, 15);
-
-        TextView title = tv("☰  Menu", 18);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(TEXT_BRIGHT);
-        title.setPadding(0, 0, 0, 0);
-        header.addView(title, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        TextView close = iconBtn("✕", 22);
-        close.setTextColor(TEXT_BRIGHT);
-        close.setPadding(15, 5, 15, 5);
-        close.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { dialog.dismiss(); }
-        });
-        header.addView(close);
-
-        layout.addView(header);
-
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout items = new LinearLayout(this);
-        items.setOrientation(LinearLayout.VERTICAL);
-
-        String[][] menuItems = {
-                {"📁", "New Project"},
-                {"📄", "New File"},
-                {"📂", "New Folder"},
-                {"💾", "Save File"},
-                {"💾", "Save All Files"},
-                {"✕", "Close Current File"},
-                {"↶", "Undo"},
-                {"↷", "Redo"},
-                {"≡", "Format Document"},
-                {"//", "Toggle Comment"},
-                {"⎘", "Duplicate Line"},
-                {"🗑", "Delete Line"},
-                {"↑↓", "Move Line Up/Down"},
-                {"→", "Indent Selection"},
-                {"←", "Outdent Selection"},
-                {"📋", "Copy / Cut / Paste"},
-                {"🔍", "Find & Replace"},
-                {"→", "Go to Line"},
-                {"👁", "Toggle XML Preview"},
-                {"🔖", "Bookmarks"},
-                {"🎨", "Change Theme"},
-                {"🎯", "Change Accent Color"},
-                {"🗺", "Toggle Minimap"},
-                {"↩", "Toggle Word Wrap"},
-                {"🖥", "Toggle Zen Mode"},
-                {"📜", "Recent Files"},
-                {"⚙", "Settings"},
-                {"ℹ", "About Aladdin IDE"}
-        };
-
-        for (final String[] item : menuItems) {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(10, 12, 10, 12);
-            row.setBackgroundColor(PANEL_BG);
-
-            TextView icon = tv(item[0], 16);
-            icon.setPadding(0, 0, 15, 0);
-            row.addView(icon);
-
-            TextView label = tv(item[1], 14);
-            label.setPadding(0, 0, 0, 0);
-            row.addView(label, new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-            row.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    dialog.dismiss();
-                    executeCommand(item[1]);
-                }
-            });
-
-            items.addView(row);
-
-            View divider = new View(this);
-            divider.setBackgroundColor(SIDEBAR_BG);
-            LinearLayout.LayoutParams dp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 1);
-            divider.setLayoutParams(dp);
-            items.addView(divider);
-        }
-
-        scroll.addView(items);
-        scroll.setLayoutParams(new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-        layout.addView(scroll);
-
-        return layout;
-    }
-
-    // ========== EXPLORER ==========
-    void buildExplorerPanel() {
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(14, 14, 8, 10);
-
-        TextView title = tv("EXPLORER", 10);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(TEXT_DIM);
-        title.setPadding(0, 0, 0, 0);
-        header.addView(title, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        TextView nf = tipIcon("📄+", 12, "New file");
-        nf.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (currentProject == null) { toast("Open a project first"); return; }
-                createNewFile(currentProject);
-            }
-        });
-        header.addView(nf);
-
-        TextView nd = tipIcon("📁+", 12, "New folder");
-        nd.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (currentProject == null) { toast("Open a project first"); return; }
-                createNewFolder(currentProject);
-            }
-        });
-        header.addView(nd);
-
-        TextView hd = tipIcon(showHidden ? "👁" : "👁‍🗨", 12, "Toggle hidden files");
-        hd.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showHidden = !showHidden; refreshLayout(); }
-        });
-        header.addView(hd);
-
-        TextView rf = tipIcon("↻", 14, "Refresh");
-        rf.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { refreshLayout(); }
-        });
-        header.addView(rf);
-        sidebarContent.addView(header);
-
-        // Recent projects section
-        if (!recentProjects.isEmpty()) {
-            TextView recentTitle = tv("RECENT PROJECTS", 9);
-            recentTitle.setTextColor(ACCENT_LIGHT);
-            recentTitle.setPadding(14, 8, 10, 4);
-            sidebarContent.addView(recentTitle);
-            int count = 0;
-            for (File rp : recentProjects) {
-                if (count++ >= 3) break;
-                if (!rp.exists()) continue;
-                TextView r = tv("  🕐 " + rp.getName(), 11);
-                r.setTextColor(TEXT_DIM);
-                r.setPadding(14, 6, 10, 6);
-                r.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) {
-                        currentProject = rp;
-                        refreshLayout();
-                    }
-                });
-                sidebarContent.addView(r);
-            }
-        }
-
-        File[] list = projectsDir.listFiles();
-        if (list == null || list.length == 0) { buildEmptyExplorer(); return; }
-        Arrays.sort(list, new Comparator<File>() {
-            @Override public int compare(File a, File b) {
-                return a.getName().compareToIgnoreCase(b.getName());
-            }
-        });
-        boolean any = false;
-        for (final File p : list) {
-            if (!p.isDirectory()) continue;
-            any = true;
-            projectList.add(p);
-            boolean isOpen = p.equals(currentProject);
-            String icon = isOpen ? "▾ " : "▸ ";
-            TextView item = tv(icon + p.getName(), 12);
-            item.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-            item.setTextColor(isOpen ? TEXT_BRIGHT : TEXT);
-            item.setPadding(14, 10, 10, 10);
-            item.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    if (currentProject != null && currentProject.equals(p)) {
-                        currentProject = null;
-                    } else {
-                        currentProject = p;
-                        if (!recentProjects.contains(p)) recentProjects.add(0, p);
-                        if (recentProjects.size() > 5) recentProjects.remove(5);
-                        statusLeft.setText("⑂ " + p.getName());
-                    }
-                    refreshLayout();
-                }
-            });
-            item.setOnLongClickListener(new View.OnLongClickListener() {
-                @Override public boolean onLongClick(View v) { showProjectMenu(p); return true; }
-            });
-            sidebarContent.addView(item);
-            if (isOpen) renderTree(p, 1);
-        }
-        if (!any) buildEmptyExplorer();
-    }
-
-    void buildEmptyExplorer() {
-        TextView empty = tv("\n\n📭\n\nNo projects yet.\n\nTap below to create your first Android project.", 12);
-        empty.setTextColor(TEXT_DIM);
-        empty.setPadding(16, 20, 16, 20);
-        empty.setGravity(Gravity.CENTER);
-        sidebarContent.addView(empty);
-        Button btn = btn("+  Create Project");
-        btn.setTextColor(Color.WHITE);
-        btn.setBackgroundColor(ACCENT);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        p.setMargins(14, 10, 14, 10);
-        btn.setLayoutParams(p);
-        btn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { createProject(); }
-        });
-        sidebarContent.addView(btn);
-    }
-
-    void showProjectMenu(final File proj) {
-        final String[] opts = {"Open","Delete Project"};
-        new AlertDialog.Builder(this).setTitle(proj.getName())
-                .setItems(opts, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        if (opts[w].equals("Open")) {
-                            currentProject = proj; refreshLayout();
-                        } else {
-                            new AlertDialog.Builder(MainActivity.this)
-                                    .setTitle("Delete Project")
-                                    .setMessage("Delete " + proj.getName() + "?")
-                                    .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
-                                        @Override public void onClick(DialogInterface dd, int ww) {
-                                            deleteRec(proj);
-                                            if (proj.equals(currentProject)) currentProject = null;
-                                            refreshLayout();
-                                        }
-                                    }).setNegativeButton("Cancel", null).show();
-                        }
-                    }
-                }).show();
-    }
-
-    void renderTree(File dir, int depth) {
-        File[] list = dir.listFiles();
-        if (list == null) return;
-        Arrays.sort(list, new Comparator<File>() {
-            @Override public int compare(File a, File b) {
-                if (a.isDirectory() && !b.isDirectory()) return -1;
-                if (!a.isDirectory() && b.isDirectory()) return 1;
-                return a.getName().compareToIgnoreCase(b.getName());
-            }
-        });
-        for (final File f : list) {
-            if (!showHidden && f.getName().startsWith(".")) continue;
-            boolean collapsed = collapsedFolders.contains(f);
-            String icon = f.isDirectory() ? (collapsed ? "▸ " : "▾ ") : fileIcon(f.getName());
-            TextView item = tv(icon + f.getName(), 11);
-            item.setPadding(14 + depth * 14, 8, 10, 8);
-            item.setTextColor(f.isDirectory() ? TEXT : TEXT_DIM);
-            if (f.isDirectory()) {
-                item.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) {
-                        if (collapsedFolders.contains(f)) collapsedFolders.remove(f);
-                        else collapsedFolders.add(f);
-                        refreshLayout();
-                    }
-                });
-                item.setOnLongClickListener(new View.OnLongClickListener() {
-                    @Override public boolean onLongClick(View v) { showContextMenu(f, true); return true; }
-                });
-            } else {
-                if (f.equals(currentFile)) item.setTextColor(TEXT_BRIGHT);
-                item.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) { openFile(f); }
-                });
-                item.setOnLongClickListener(new View.OnLongClickListener() {
-                    @Override public boolean onLongClick(View v) { showContextMenu(f, false); return true; }
-                });
-            }
-            sidebarContent.addView(item);
-            if (f.isDirectory() && !collapsed) renderTree(f, depth + 1);
-        }
-    }
-
-    String fileIcon(String name) {
-        if (name.endsWith(".java")) return "☕";
-        if (name.endsWith(".xml")) return "📄";
-        if (name.endsWith(".gradle")) return "🐘";
-        if (name.endsWith(".kt")) return "🟣";
-        if (name.endsWith(".js")) return "🟨";
-        if (name.endsWith(".html")) return "🌐";
-        if (name.endsWith(".css")) return "🎨";
-        if (name.endsWith(".json")) return "📋";
-        if (name.endsWith(".md")) return "📖";
-        if (name.endsWith(".txt")) return "📝";
-        if (name.endsWith(".png")||name.endsWith(".jpg")) return "🖼";
-        if (name.endsWith(".sh")) return "⚡";
-        return "📃";
-    }
-
-    // ========== OUTLINE ==========
-    void buildOutlinePanel() {
-        TextView title = tv("OUTLINE", 10);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(TEXT_DIM);
-        title.setPadding(14, 14, 10, 10);
-        sidebarContent.addView(title);
-        if (currentFile == null) {
-            TextView msg = tv("Open a Java file.", 11);
-            msg.setTextColor(TEXT_DIM);
-            msg.setPadding(14, 12, 14, 12);
-            sidebarContent.addView(msg); return;
-        }
-        ArrayList<String> symbols = extractSymbols(codeEditor.getText().toString());
-        if (symbols.isEmpty()) {
-            TextView msg = tv("No symbols.", 11);
-            msg.setTextColor(TEXT_DIM);
-            msg.setPadding(14, 12, 14, 12);
-            sidebarContent.addView(msg); return;
-        }
-        for (final String s : symbols) {
-            TextView sym = tv(s, 11);
-            sym.setTextColor(s.startsWith("C ") ? ACCENT_LIGHT : TEXT);
-            sym.setPadding(14, 8, 10, 8);
-            final int line = extractLineNumber(s);
-            sym.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { if (line > 0) gotoLine(line); }
-            });
-            sidebarContent.addView(sym);
-        }
-    }
-
-    ArrayList<String> extractSymbols(String text) {
-        ArrayList<String> out = new ArrayList<String>();
-        String[] lines = text.split("\n");
-        Pattern classPat = Pattern.compile("(class|interface|enum)\\s+(\\w+)");
-        Pattern methodPat = Pattern.compile("(public|private|protected|static|void|int|String|boolean|double|float|long)\\s+[\\w<>\\[\\]]+\\s+(\\w+)\\s*\\(");
-        for (int i = 0; i < lines.length; i++) {
-            String line = lines[i].trim();
-            Matcher cm = classPat.matcher(line);
-            if (cm.find() && !line.startsWith("//")) {
-                out.add("C " + cm.group(1) + " " + cm.group(2) + "  L" + (i+1));
-                continue;
-            }
-            Matcher mm = methodPat.matcher(line);
-            if (mm.find() && !line.startsWith("//") && !line.contains("new ")) {
-                out.add("    ▸ " + mm.group(2) + "()  L" + (i+1));
-            }
-        }
-        return out;
-    }
-
-    int extractLineNumber(String s) {
-        int idx = s.lastIndexOf(" L");
-        if (idx < 0) return -1;
-        try { return Integer.parseInt(s.substring(idx + 2).trim()); } catch (Exception e) { return -1; }
-    }
-
-    void gotoLine(int line) {
-        String text = codeEditor.getText().toString();
-        int idx = 0, cur = 1;
-        while (cur < line && idx < text.length()) {
-            if (text.charAt(idx) == '\n') cur++;
-            idx++;
-        }
-        codeEditor.setSelection(Math.min(idx, text.length()));
-    }
-
-    // ========== SEARCH ==========
-    void buildSearchPanel() {
-        TextView title = tv("SEARCH", 10);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(TEXT_DIM);
-        title.setPadding(14, 14, 10, 10);
-        sidebarContent.addView(title);
-
-        final EditText query = new EditText(this);
-        query.setHint("Search...");
-        query.setTextColor(TEXT); query.setHintTextColor(TEXT_DIM);
-        query.setTextSize(12); query.setBackgroundColor(PANEL_BG);
-        query.setPadding(12, 10, 12, 10);
-        LinearLayout.LayoutParams qp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        qp.setMargins(14, 4, 14, 6);
-        query.setLayoutParams(qp);
-        sidebarContent.addView(query);
-
-        final CheckBox cs = new CheckBox(this);
-        cs.setText("Case sensitive"); cs.setTextColor(TEXT_DIM); cs.setTextSize(10);
-        cs.setPadding(14, 2, 14, 6);
-        sidebarContent.addView(cs);
-
-        Button searchBtn = btn("🔍  Search");
-        searchBtn.setTextColor(Color.WHITE);
-        searchBtn.setBackgroundColor(ACCENT);
-        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        bp.setMargins(14, 4, 14, 12);
-        searchBtn.setLayoutParams(bp);
-        searchBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                searchCase = cs.isChecked();
-                String q = query.getText().toString().trim();
-                if (q.isEmpty()) return;
-                if (!searchHistory.contains(q)) {
-                    searchHistory.add(0, q);
-                    if (searchHistory.size() > 5) searchHistory.remove(5);
-                }
-                performSearch(q);
-            }
-        });
-        sidebarContent.addView(searchBtn);
-
-        if (!searchHistory.isEmpty()) {
-            TextView hist = tv("Recent searches", 9);
-            hist.setTextColor(ACCENT_LIGHT);
-            hist.setPadding(14, 10, 10, 4);
-            sidebarContent.addView(hist);
-            for (final String h : searchHistory) {
-                TextView item = tv("  🕐 " + h, 11);
-                item.setTextColor(TEXT_DIM);
-                item.setPadding(14, 6, 10, 6);
-                item.setOnClickListener(new View.OnClickListener() {
-                    @Override public void onClick(View v) { query.setText(h); performSearch(h); }
-                });
-                sidebarContent.addView(item);
-            }
-        }
-
-        LinearLayout results = new LinearLayout(this);
-        results.setOrientation(LinearLayout.VERTICAL);
-        results.setId(999);
-        sidebarContent.addView(results);
-    }
-
-    void performSearch(String q) {
-        LinearLayout results = sidebarContent.findViewById(999);
-        if (results == null) return;
-        results.removeAllViews();
-        if (currentProject == null) { toast("Open a project first"); return; }
-        ArrayList<String> found = new ArrayList<String>();
-        searchInDir(currentProject, q, found);
-        TextView header = tv(found.size() + " results", 10);
-        header.setTextColor(ACCENT_LIGHT);
-        header.setPadding(14, 8, 10, 8);
-        results.addView(header);
-        for (String s : found) {
-            final String[] parts = s.split("\\|");
-            TextView r = tv("  " + parts[0] + ":" + parts[1], 10);
-            r.setTextColor(TEXT_DIM);
-            r.setPadding(18, 6, 10, 6);
-            r.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    try {
-                        File target = new File(currentProject, parts[0]);
-                        if (target.exists()) { openFile(target); gotoLine(Integer.parseInt(parts[1])); }
-                    } catch (Exception e) {}
-                }
-            });
-            results.addView(r);
-        }
-    }
-
-    void searchInDir(File dir, String q, ArrayList<String> out) {
-        File[] files = dir.listFiles();
-        if (files == null) return;
-        for (File f : files) {
-            if (f.isDirectory()) searchInDir(f, q, out);
-            else if (f.length() < 500000 && !f.getName().startsWith(".")) {
-                try {
-                    String content = readFile(f);
-                    String[] lines = content.split("\n");
-                    for (int i = 0; i < lines.length; i++) {
-                        String line = searchCase ? lines[i] : lines[i].toLowerCase();
-                        String needle = searchCase ? q : q.toLowerCase();
-                        if (line.contains(needle)) {
-                            out.add(f.getName() + "|" + (i+1));
-                            if (out.size() > 100) return;
-                        }
-                    }
-                } catch (Exception e) {}
-            }
-        }
-    }
-
-    // ========== SOURCE CONTROL ==========
-    void buildSourcePanel() {
-        TextView title = tv("SOURCE CONTROL", 10);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(TEXT_DIM);
-        title.setPadding(14, 14, 10, 10);
-        sidebarContent.addView(title);
-        if (githubUser.isEmpty() || githubRepo.isEmpty()) {
-            TextView msg = tv("No repository configured.\n\nAdd GitHub username and repo in Settings.", 11);
-            msg.setTextColor(TEXT_DIM);
-            msg.setPadding(14, 12, 14, 12);
-            sidebarContent.addView(msg);
-            Button setup = btn("Open Settings");
-            setup.setTextColor(Color.WHITE);
-            setup.setBackgroundColor(ACCENT);
-            LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            sp.setMargins(14, 10, 14, 10);
-            setup.setLayoutParams(sp);
-            setup.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { selectActivity(5); }
-            });
-            sidebarContent.addView(setup);
-            return;
-        }
-        TextView repo = tv("⑂ " + githubUser + "/" + githubRepo, 12);
-        repo.setTextColor(TEXT_BRIGHT);
-        repo.setPadding(14, 10, 10, 12);
-        sidebarContent.addView(repo);
-        Button sync = btn("▶  Trigger Cloud Build");
-        sync.setTextColor(Color.WHITE);
-        sync.setBackgroundColor(ACCENT);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        sp.setMargins(14, 4, 14, 4);
-        sync.setLayoutParams(sp);
-        sync.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (currentProject == null) { toast("Open a project first"); return; }
-                triggerCloudBuild();
-            }
-        });
-        sidebarContent.addView(sync);
-        Button logs = btn("📋  GitHub Logs");
-        logs.setTextColor(TEXT);
-        logs.setBackgroundColor(PANEL_BG);
-        logs.setLayoutParams(sp);
-        logs.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                startActivity(new Intent(Intent.ACTION_VIEW,
-                        Uri.parse("https://github.com/" + githubUser + "/" + githubRepo + "/actions")));
-            }
-        });
-        sidebarContent.addView(logs);
-    }
-
-    // ========== SNIPPETS ==========
-    void buildSnippetsPanel() {
-        TextView title = tv("SNIPPETS", 10);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(TEXT_DIM);
-        title.setPadding(14, 14, 10, 10);
-        sidebarContent.addView(title);
-        TextView help = tv("Tap to insert at cursor.", 10);
-        help.setTextColor(TEXT_DIM);
-        help.setPadding(14, 4, 14, 12);
-        sidebarContent.addView(help);
-        addSnippet("☕ Java — Activity", "package com.example;\n\nimport android.app.Activity;\nimport android.os.Bundle;\n\npublic class MyActivity extends Activity {\n    @Override\n    protected void onCreate(Bundle savedInstanceState) {\n        super.onCreate(savedInstanceState);\n    }\n}\n");
-        addSnippet("☕ Java — For Loop", "for (int i = 0; i < 10; i++) {\n    \n}\n");
-        addSnippet("☕ Java — Try/Catch", "try {\n    \n} catch (Exception e) {\n    e.printStackTrace();\n}\n");
-        addSnippet("☕ Java — Toast", "Toast.makeText(this, \"Hello\", Toast.LENGTH_SHORT).show();\n");
-        addSnippet("📄 XML — LinearLayout", "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n    android:layout_width=\"match_parent\"\n    android:layout_height=\"match_parent\"\n    android:orientation=\"vertical\">\n    \n</LinearLayout>\n");
-        addSnippet("📄 XML — TextView", "<TextView\n    android:layout_width=\"wrap_content\"\n    android:layout_height=\"wrap_content\"\n    android:text=\"Hello\" />\n");
-        addSnippet("📄 XML — Button", "<Button\n    android:layout_width=\"wrap_content\"\n    android:layout_height=\"wrap_content\"\n    android:text=\"Click Me\" />\n");
-        addSnippet("🐘 Gradle — App", "plugins {\n    id 'com.android.application'\n}\n\nandroid {\n    namespace 'com.example.app'\n    compileSdk 34\n    defaultConfig {\n        applicationId 'com.example.app'\n        minSdk 24\n        targetSdk 34\n        versionCode 1\n        versionName '1.0'\n    }\n}\n");
-    }
-    void addSnippet(final String name, final String code) {
-        TextView item = tv(name, 11);
-        item.setTextColor(TEXT);
-        item.setPadding(14, 12, 10, 12);
-        item.setBackgroundColor(PANEL_BG);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        p.setMargins(14, 3, 14, 3);
-        item.setLayoutParams(p);
-        item.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                int start = codeEditor.getSelectionStart();
-                codeEditor.getText().insert(start, code);
-                toast("Inserted");
-            }
-        });
-        sidebarContent.addView(item);
-    }
-
-    // ========== SETTINGS ==========
-    void buildSettingsPanel() {
-        TextView title = tv("SETTINGS", 10);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setTextColor(TEXT_DIM);
-        title.setPadding(14, 14, 10, 10);
-        sidebarContent.addView(title);
-        settingsSection("GITHUB");
-        final EditText uIn = settingsField("Username", githubUser);
-        final EditText rIn = settingsField("Repository", githubRepo);
-        final EditText tIn = settingsField("Token", githubToken);
-        settingsSection("APPEARANCE");
-        Button themeBtn = btn("🎨  Theme: " + currentTheme);
-        themeBtn.setTextColor(TEXT);
-        themeBtn.setBackgroundColor(PANEL_BG);
-        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        tp.setMargins(14, 4, 14, 4);
-        themeBtn.setLayoutParams(tp);
-        themeBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showThemePicker(); }
-        });
-        sidebarContent.addView(themeBtn);
-        Button accentBtn = btn("🎯  Accent color");
-        accentBtn.setTextColor(TEXT);
-        accentBtn.setBackgroundColor(PANEL_BG);
-        accentBtn.setLayoutParams(tp);
-        accentBtn.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showAccentPicker(); }
-        });
-        sidebarContent.addView(accentBtn);
-        final EditText fsIn = settingsField("Font size (8-30)", String.valueOf(fontSize));
-        settingsSection("EDITOR");
-        final CheckBox wrapBox = settingsCheck("Word wrap", wordWrap);
-        final CheckBox acBox = settingsCheck("Auto-close brackets", autoClose);
-        final CheckBox lnBox = settingsCheck("Show line numbers", lineNumbersOn);
-        final CheckBox mmBox = settingsCheck("Show minimap", minimapOn);
-        settingsSection("ABOUT");
-        TextView about = tv("Aladdin IDE v8.0\nUltra Edition\n\nTermux + GitHub Actions", 10);
-        about.setTextColor(TEXT_DIM);
-        about.setPadding(14, 8, 14, 16);
-        sidebarContent.addView(about);
-        Button save = btn("💾  Save Settings");
-        save.setTextColor(Color.WHITE);
-        save.setBackgroundColor(ACCENT);
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        sp.setMargins(14, 8, 14, 12);
-        save.setLayoutParams(sp);
-        save.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                githubUser = uIn.getText().toString().trim();
-                githubRepo = rIn.getText().toString().trim();
-                githubToken = tIn.getText().toString().trim();
-                try { fontSize = Integer.parseInt(fsIn.getText().toString().trim()); } catch (Exception e) {}
-                if (fontSize < 8) fontSize = 8;
-                if (fontSize > 30) fontSize = 30;
-                wordWrap = wrapBox.isChecked();
-                autoClose = acBox.isChecked();
-                lineNumbersOn = lnBox.isChecked();
-                minimapOn = mmBox.isChecked();
-                codeEditor.setTextSize(fontSize);
-                lineNumbers.setTextSize(fontSize);
-                codeEditor.setHorizontallyScrolling(!wordWrap);
-                lineNumbers.setVisibility(lineNumbersOn ? View.VISIBLE : View.GONE);
-                minimap.setVisibility(minimapOn ? View.VISIBLE : View.GONE);
-                getSharedPreferences("AladdinPrefs", MODE_PRIVATE).edit()
-                        .putString("user", githubUser).putString("repo", githubRepo)
-                        .putString("token", githubToken).putInt("fontSize", fontSize)
-                        .putBoolean("wordWrap", wordWrap).putBoolean("autoClose", autoClose)
-                        .putBoolean("lineNumbers", lineNumbersOn).putBoolean("minimap", minimapOn)
-                        .apply();
-                toast("✓ Settings saved");
-            }
-        });
-        sidebarContent.addView(save);
-    }
-    void settingsSection(String name) {
-        TextView t = tv(name, 9);
-        t.setTextColor(ACCENT_LIGHT);
-        t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        t.setPadding(14, 16, 10, 4);
-        sidebarContent.addView(t);
-    }
-    EditText settingsField(String hint, String value) {
-        EditText e = new EditText(this);
-        e.setHint(hint); e.setText(value);
-        e.setTextColor(TEXT); e.setHintTextColor(TEXT_DIM);
-        e.setTextSize(11); e.setBackgroundColor(PANEL_BG);
-        e.setPadding(12, 10, 12, 10);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        p.setMargins(14, 3, 14, 3);
-        e.setLayoutParams(p);
-        sidebarContent.addView(e);
-        return e;
-    }
-    CheckBox settingsCheck(String label, boolean checked) {
-        CheckBox c = new CheckBox(this);
-        c.setText(label); c.setTextColor(TEXT); c.setTextSize(11);
-        c.setChecked(checked); c.setPadding(14, 3, 14, 3);
-        sidebarContent.addView(c);
-        return c;
-    }
-
-    // ========== COMMAND PALETTE ==========
-    void showCommandPalette() {
-        final String[] commands = {
-                "📁  New Project", "📄  New File", "📂  New Folder",
-                "💾  Save File", "💾  Save All Files", "✕  Close Current File",
-                "↶  Undo", "↷  Redo", "≡  Format Document",
-                "//  Toggle Comment", "⎘  Duplicate Line", "🗑  Delete Line",
-                "↑↓  Move Line Up/Down", "→  Indent Selection", "←  Outdent Selection",
-                "📋  Copy / Cut / Paste",
-                "🔍  Find & Replace", "→  Go to Line",
-                "👁  Toggle XML Preview", "🔖  Bookmarks",
-                "🎨  Change Theme", "🎯  Change Accent Color",
-                "🗺  Toggle Minimap", "↩  Toggle Word Wrap",
-                "🖥  Toggle Zen Mode", "📜  Recent Files",
-                "⚙  Settings", "ℹ  About Aladdin IDE",
-                "🔄  Refresh Explorer", "📋  Copy File Path", "🗑  Clear Terminal"
-        };
-        new AlertDialog.Builder(this)
-                .setTitle("⌘  Command Palette")
-                .setItems(commands, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        executeCommand(commands[w].substring(3).trim());
-                    }
-                }).show();
-    }
-
-    void executeCommand(String cmd) {
-        if (cmd.equals("New Project")) createProject();
-        else if (cmd.equals("New File")) {
-            if (currentProject == null) { toast("Open a project first"); return; }
-            createNewFile(currentProject);
-        }
-        else if (cmd.equals("New Folder")) {
-            if (currentProject == null) { toast("Open a project first"); return; }
-            createNewFolder(currentProject);
-        }
-        else if (cmd.equals("Save File")) saveCurrentFile();
-        else if (cmd.equals("Save All Files")) saveAll();
-        else if (cmd.equals("Close Current File")) closeCurrentFile();
-        else if (cmd.equals("Undo")) performUndo();
-        else if (cmd.equals("Redo")) performRedo();
-        else if (cmd.equals("Format Document")) formatDocument();
-        else if (cmd.equals("Toggle Comment")) toggleComment();
-        else if (cmd.equals("Duplicate Line")) duplicateLine();
-        else if (cmd.equals("Delete Line")) deleteLine();
-        else if (cmd.equals("Move Line Up/Down")) showMoveLineDialog();
-        else if (cmd.equals("Indent Selection")) indentSelection(true);
-        else if (cmd.equals("Outdent Selection")) indentSelection(false);
-        else if (cmd.equals("Copy / Cut / Paste")) showClipboardMenu();
-        else if (cmd.equals("Find & Replace")) showFindReplace();
-        else if (cmd.equals("Go to Line")) showGotoLine();
-        else if (cmd.equals("Toggle XML Preview")) togglePreview();
-        else if (cmd.equals("Bookmarks")) showBookmarksMenu();
-        else if (cmd.equals("Change Theme")) showThemePicker();
-        else if (cmd.equals("Change Accent Color")) showAccentPicker();
-        else if (cmd.equals("Toggle Minimap")) {
-            minimapOn = !minimapOn;
-            minimap.setVisibility(minimapOn ? View.VISIBLE : View.GONE);
-            toast("Minimap " + (minimapOn ? "on" : "off"));
-        }
-        else if (cmd.equals("Toggle Word Wrap")) {
-            wordWrap = !wordWrap;
-            codeEditor.setHorizontallyScrolling(!wordWrap);
-            toast("Word wrap " + (wordWrap ? "on" : "off"));
-        }
-        else if (cmd.equals("Toggle Zen Mode")) toggleZen();
-        else if (cmd.equals("Recent Files")) showRecentFiles();
-        else if (cmd.equals("Settings")) selectActivity(5);
-        else if (cmd.equals("About Aladdin IDE")) showAbout();
-        else if (cmd.equals("Refresh Explorer")) { refreshLayout(); toast("Refreshed"); }
-        else if (cmd.equals("Copy File Path")) {
-            if (currentFile == null) { toast("No file open"); return; }
-            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("path", currentFile.getAbsolutePath()));
-            toast("Path copied");
-        }
-        else if (cmd.equals("Clear Terminal")) { consoleOutput.setText(""); toast("Cleared"); }
-    }
-
-    // ========== EDIT OPERATIONS ==========
-    void toggleComment() {
-        int s = codeEditor.getSelectionStart();
-        int e = codeEditor.getSelectionEnd();
-        if (s == e) { s = codeEditor.getSelectionStart(); }
-        String text = codeEditor.getText().toString();
-        int lineStart = text.lastIndexOf('\n', s) + 1;
-        int lineEnd = text.indexOf('\n', Math.max(s, e));
-        if (lineEnd < 0) lineEnd = text.length();
-        String block = text.substring(lineStart, lineEnd);
-        String[] lines = block.split("\n", -1);
-        boolean allCommented = true;
-        for (String ln : lines) { if (!ln.trim().startsWith("//")) { allCommented = false; break; } }
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            if (allCommented) {
-                int idx = lines[i].indexOf("//");
-                if (idx >= 0) sb.append(lines[i].substring(0, idx)).append(lines[i].substring(idx + 2));
-                else sb.append(lines[i]);
-            } else {
-                sb.append("// ").append(lines[i]);
-            }
-            if (i < lines.length - 1) sb.append("\n");
-        }
-        Editable ed = codeEditor.getText();
-        ed.replace(lineStart, lineEnd, sb.toString());
-        toast(allCommented ? "Uncommented" : "Commented");
-    }
-
-    void duplicateLine() {
-        int pos = codeEditor.getSelectionStart();
-        String text = codeEditor.getText().toString();
-        int lineStart = text.lastIndexOf('\n', pos - 1) + 1;
-        int lineEnd = text.indexOf('\n', pos);
-        if (lineEnd < 0) lineEnd = text.length();
-        String line = text.substring(lineStart, lineEnd);
-        codeEditor.getText().insert(lineEnd, "\n" + line);
-        toast("Line duplicated");
-    }
-
-    void deleteLine() {
-        int pos = codeEditor.getSelectionStart();
-        String text = codeEditor.getText().toString();
-        int lineStart = text.lastIndexOf('\n', pos - 1) + 1;
-        int lineEnd = text.indexOf('\n', pos);
-        if (lineEnd < 0) lineEnd = text.length();
-        else lineEnd++;
-        if (lineEnd > text.length()) lineEnd = text.length();
-        codeEditor.getText().delete(lineStart, lineEnd);
-        toast("Line deleted");
-    }
-
-    void showMoveLineDialog() {
-        String[] opts = {"↑  Move Up", "↓  Move Down"};
-        new AlertDialog.Builder(this).setTitle("Move Line")
-                .setItems(opts, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        moveLine(w == 0);
-                    }
-                }).show();
-    }
-
-    void moveLine(boolean up) {
-        int pos = codeEditor.getSelectionStart();
-        String text = codeEditor.getText().toString();
-        int lineStart = text.lastIndexOf('\n', pos - 1) + 1;
-        int lineEnd = text.indexOf('\n', pos);
-        if (lineEnd < 0) lineEnd = text.length();
-        String line = text.substring(lineStart, lineEnd);
-        if (up) {
-            if (lineStart == 0) { toast("Already at top"); return; }
-            int prevStart = text.lastIndexOf('\n', lineStart - 2) + 1;
-            String prevLine = text.substring(prevStart, lineStart - 1);
-            Editable ed = codeEditor.getText();
-            ed.replace(prevStart, lineEnd, line + "\n" + prevLine);
-        } else {
-            if (lineEnd >= text.length()) { toast("Already at bottom"); return; }
-            int nextEnd = text.indexOf('\n', lineEnd + 1);
-            if (nextEnd < 0) nextEnd = text.length();
-            String nextLine = text.substring(lineEnd + 1, nextEnd);
-            Editable ed = codeEditor.getText();
-            ed.replace(lineStart, nextEnd, nextLine + "\n" + line);
-        }
-    }
-
-    void indentSelection(boolean indent) {
-        int s = codeEditor.getSelectionStart();
-        int e = codeEditor.getSelectionEnd();
-        String text = codeEditor.getText().toString();
-        int lineStart = text.lastIndexOf('\n', s - 1) + 1;
-        int lineEnd = text.indexOf('\n', Math.max(s, e));
-        if (lineEnd < 0) lineEnd = text.length();
-        String block = text.substring(lineStart, lineEnd);
-        String[] lines = block.split("\n", -1);
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < lines.length; i++) {
-            if (indent) sb.append("    ").append(lines[i]);
-            else sb.append(lines[i].startsWith("    ") ? lines[i].substring(4) : lines[i]);
-            if (i < lines.length - 1) sb.append("\n");
-        }
-        codeEditor.getText().replace(lineStart, lineEnd, sb.toString());
-        toast(indent ? "Indented" : "Outdented");
-    }
-
-    void showClipboardMenu() {
-        String[] opts = {"📋  Copy", "✂  Cut", "📥  Paste", "☑  Select All"};
-        final android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-        new AlertDialog.Builder(this).setTitle("Clipboard")
-                .setItems(opts, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        if (w == 0) {
-                            int s = codeEditor.getSelectionStart();
-                            int e = codeEditor.getSelectionEnd();
-                            if (s == e) { toast("Nothing selected"); return; }
-                            cm.setPrimaryClip(android.content.ClipData.newPlainText("text", codeEditor.getText().subSequence(s, e)));
-                            toast("Copied");
-                        } else if (w == 1) {
-                            int s = codeEditor.getSelectionStart();
-                            int e = codeEditor.getSelectionEnd();
-                            if (s == e) { toast("Nothing selected"); return; }
-                            cm.setPrimaryClip(android.content.ClipData.newPlainText("text", codeEditor.getText().subSequence(s, e)));
-                            codeEditor.getText().delete(s, e);
-                            toast("Cut");
-                        } else if (w == 2) {
-                            if (cm.hasPrimaryClip()) {
-                                codeEditor.getText().insert(codeEditor.getSelectionStart(),
-                                        cm.getPrimaryClip().getItemAt(0).getText());
-                                toast("Pasted");
-                            }
-                        } else {
-                            codeEditor.setSelection(0, codeEditor.getText().length());
-                            toast("Select all");
-                        }
-                    }
-                }).show();
-    }
-
-    // ========== BOOKMARKS ==========
-    void toggleBookmark() {
-        if (currentFile == null) { toast("No file"); return; }
-        String text = codeEditor.getText().toString();
-        int pos = codeEditor.getSelectionStart();
-        int line = 1;
-        for (int i = 0; i < pos && i < text.length(); i++) if (text.charAt(i) == '\n') line++;
-        if (bookmarks.contains(line)) { bookmarks.remove(Integer.valueOf(line)); toast("Bookmark removed"); }
-        else { bookmarks.add(line); toast("🔖 Bookmarked line " + line); }
-    }
-
-    void showBookmarksMenu() {
-        if (bookmarks.isEmpty()) { toast("No bookmarks"); return; }
-        String[] items = new String[bookmarks.size()];
-        for (int i = 0; i < bookmarks.size(); i++) items[i] = "🔖 Line " + bookmarks.get(i);
-        new AlertDialog.Builder(this).setTitle("Bookmarks")
-                .setItems(items, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) { gotoLine(bookmarks.get(w)); }
-                }).show();
-    }
-
-    // ========== XML PREVIEW ==========
-    void togglePreview() {
-        if (currentFile == null) { toast("Open a file"); return; }
-        if (showPreview) {
-            showPreview = false;
-            previewPane.setVisibility(View.GONE);
-            editorScroll.setVisibility(View.VISIBLE);
-        } else {
-            showPreview = true;
-            String text = codeEditor.getText().toString();
-            String preview = renderXmlPreview(text);
-            previewPane.setText(preview);
-            previewPane.setVisibility(View.VISIBLE);
-            editorScroll.setVisibility(View.GONE);
-        }
-    }
-
-    String renderXmlPreview(String xml) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("📱  XML PREVIEW\n");
-        sb.append("───────────────────────\n\n");
-        int depth = 0;
-        String[] lines = xml.split("\n");
-        for (String line : lines) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith("</")) depth = Math.max(0, depth - 1);
-            for (int i = 0; i < depth; i++) sb.append("│  ");
-            if (trimmed.startsWith("<?") || trimmed.startsWith("<!--")) {
-                sb.append(trimmed).append("\n");
-            } else if (trimmed.startsWith("</")) {
-                sb.append("└─ ").append(trimmed).append("\n");
-            } else if (trimmed.startsWith("<") && trimmed.endsWith("/>")) {
-                sb.append("◆ ").append(trimmed).append("\n");
-            } else if (trimmed.startsWith("<")) {
-                String tag = trimmed.split("[ >]")[0].substring(1);
-                sb.append("▼ ").append(tag).append("\n");
-                if (!trimmed.contains("</")) depth++;
-            } else if (!trimmed.isEmpty()) {
-                sb.append("  ").append(trimmed).append("\n");
-            }
-            if (trimmed.contains("</") && !trimmed.startsWith("</")) depth = Math.max(0, depth - 1);
-        }
-        return sb.toString();
-    }
-
-    // ========== UNDO / REDO ==========
-    void performUndo() {
-        if (undoStack.isEmpty()) { toast("Nothing to undo"); return; }
-        redoStack.add(codeEditor.getText().toString());
-        redoPos.add(codeEditor.getSelectionStart());
-        String prev = undoStack.remove(undoStack.size() - 1);
-        int pos = undoPos.remove(undoPos.size() - 1);
-        recordingUndo = false;
-        codeEditor.setText(prev);
-        try { codeEditor.setSelection(Math.min(pos, prev.length())); } catch (Exception e) {}
-        recordingUndo = true;
-        lastText = prev;
-        toast("↶ Undo");
-    }
-
-    void performRedo() {
-        if (redoStack.isEmpty()) { toast("Nothing to redo"); return; }
-        undoStack.add(codeEditor.getText().toString());
-        undoPos.add(codeEditor.getSelectionStart());
-        String next = redoStack.remove(redoStack.size() - 1);
-        int pos = redoPos.remove(redoPos.size() - 1);
-        recordingUndo = false;
-        codeEditor.setText(next);
-        try { codeEditor.setSelection(Math.min(pos, next.length())); } catch (Exception e) {}
-        recordingUndo = true;
-        lastText = next;
-        toast("↷ Redo");
-    }
-
-    void formatDocument() {
-        if (currentFile == null) { toast("No file open"); return; }
-        String text = codeEditor.getText().toString();
-        StringBuilder out = new StringBuilder();
-        int indent = 0;
-        String[] lines = text.split("\n");
-        for (String line : lines) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith("}")) indent = Math.max(0, indent - 1);
-            StringBuilder pad = new StringBuilder();
-            for (int i = 0; i < indent; i++) pad.append("    ");
-            out.append(pad).append(trimmed).append("\n");
-            int opens = count(trimmed, '{');
-            int closes = count(trimmed, '}');
-            indent += opens - closes;
-            if (indent < 0) indent = 0;
-        }
-        codeEditor.setText(out.toString());
-        toast("≡ Formatted");
-    }
-
-    int count(String s, char c) {
-        int n = 0;
-        for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++;
-        return n;
-    }
-
-    void showGotoLine() {
-        final EditText input = new EditText(this);
-        input.setHint("Line number");
-        input.setInputType(InputType.TYPE_CLASS_NUMBER);
-        new AlertDialog.Builder(this).setTitle("Go to Line").setView(input)
-                .setPositiveButton("Go", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        try { gotoLine(Integer.parseInt(input.getText().toString())); } catch (Exception e) {}
-                    }
-                }).setNegativeButton("Cancel", null).show();
-    }
-
-    void showLanguagePicker() {
-        final String[] langs = {"Java","XML","Groovy","JSON","Markdown","Plain"};
-        new AlertDialog.Builder(this).setTitle("Language")
-                .setItems(langs, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        statusLang.setText(langs[w]);
-                        toast("Language: " + langs[w]);
-                    }
-                }).show();
-    }
-
-    // ========== BOTTOM PANEL ==========
     void setPanelTab(int index) {
-        activeBottomTab = index;
+        AppState.activeBottomTab = index;
         TextView[] tabs = {tabProblems, tabOutput, tabTerminal, tabDebug};
         for (int i = 0; i < tabs.length; i++) {
             if (tabs[i] == null) continue;
-            tabs[i].setTextColor(i == index ? ACCENT_LIGHT : TEXT_DIM);
-            tabs[i].setBackgroundColor(i == index ? Color.parseColor("#181818") : SIDEBAR_BG);
+            tabs[i].setTextColor(i == index ? AppState.ACCENT_LIGHT : AppState.TEXT_DIM);
+            tabs[i].setBackgroundColor(i == index ? 0xFF181818 : AppState.SIDEBAR_BG);
         }
         if (index == 0) consoleOutput.setText("No problems detected.");
         else if (index == 1) consoleOutput.setText("Output log ready.");
-        else if (index == 2) consoleOutput.setText("$ _\nAladdin Terminal v8.0");
-        else if (index == 3) consoleOutput.setText("Debug console.\nNo active session.");
+        else if (index == 2) consoleOutput.setText("$ _\nAladdin Terminal v10.0");
+        else if (index == 3) consoleOutput.setText("Debug console.\nNo session.");
     }
 
-    // ========== MINIMAP ==========
-    void updateMinimap(String text) {
-        if (!minimapOn) return;
-        String[] lines = text.split("\n");
-        StringBuilder sb = new StringBuilder();
-        int max = Math.min(lines.length, 80);
-        for (int i = 0; i < max; i++) {
-            int len = Math.min(lines[i].length() / 3, 20);
-            for (int j = 0; j < len; j++) sb.append("█");
-            sb.append("\n");
-        }
-        minimap.setText(sb.toString());
-    }
-
-    // ========== FILE OPS ==========
-    void openFile(File f) {
-        if (currentFile != null && !currentFile.equals(f))
-            unsavedChanges.put(currentFile.getAbsolutePath(), codeEditor.getText().toString());
-        if (!recentFiles.contains(f)) {
-            recentFiles.add(0, f);
-            if (recentFiles.size() > 10) recentFiles.remove(10);
-        } else {
-            recentFiles.remove(f);
-            recentFiles.add(0, f);
-        }
-        addTab(f);
-        loadFile(f);
-    }
-
-    void loadFile(File f) {
-        try {
-            currentFile = f;
-            String content = unsavedChanges.containsKey(f.getAbsolutePath())
-                    ? unsavedChanges.get(f.getAbsolutePath()) : readFile(f);
-            recordingUndo = false;
-            codeEditor.setText(content);
-            lastText = content;
-            undoStack.clear(); redoStack.clear();
-            recordingUndo = true;
-            welcomeScreen.setVisibility(View.GONE);
-            editorScroll.setVisibility(View.VISIBLE);
-            previewPane.setVisibility(View.GONE);
-            showPreview = false;
-            addTab(f);
-            updateCursor();
-            updateLineHighlight();
-            updateCount(content);
-            if (minimapOn) updateMinimap(content);
-            statusLeft.setText("⑂ " + (currentProject != null ? currentProject.getName() : ""));
-            codeEditor.setSelection(0);
-        } catch (Exception e) { toast("Cannot open"); }
-    }
-
-    void saveCurrentFile() {
-        if (currentFile == null) { toast("No file open"); return; }
-        try {
-            writeFile(currentFile, codeEditor.getText().toString());
-            unsavedChanges.remove(currentFile.getAbsolutePath());
-            dirtyFiles.remove(currentFile);
-            addTab(currentFile);
-            toast("💾 Saved");
-        } catch (Exception e) { toast("Save error"); }
-    }
-
-    void saveAll() {
-        for (File f : new ArrayList<File>(dirtyFiles)) {
-            try {
-                if (f.equals(currentFile)) writeFile(f, codeEditor.getText().toString());
-                else if (unsavedChanges.containsKey(f.getAbsolutePath()))
-                    writeFile(f, unsavedChanges.get(f.getAbsolutePath()));
-            } catch (Exception e) {}
-        }
-        dirtyFiles.clear();
-        if (currentFile != null) addTab(currentFile);
-        toast("All saved");
-    }
-
-    void closeCurrentFile() {
-        if (currentFile == null) return;
-        openFiles.remove(currentFile);
-        dirtyFiles.remove(currentFile);
-        unsavedChanges.remove(currentFile.getAbsolutePath());
-        currentFile = null;
-        codeEditor.setText("");
-        welcomeScreen.setVisibility(View.VISIBLE);
-        editorScroll.setVisibility(View.GONE);
-        addTab(null);
-    }
-
-    String readFile(File f) throws Exception {
-        FileInputStream in = new FileInputStream(f);
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        byte[] b = new byte[4096]; int n;
-        while ((n = in.read(b)) != -1) out.write(b, 0, n);
-        in.close();
-        return out.toString("UTF-8");
-    }
-    void writeFile(File f, String d) throws Exception {
-        File p = f.getParentFile();
-        if (p != null && !p.exists()) p.mkdirs();
-        FileOutputStream o = new FileOutputStream(f);
-        o.write(d.getBytes("UTF-8"));
-        o.close();
-    }
-    void deleteRec(File f) {
-        if (f.isDirectory()) { File[] c = f.listFiles(); if (c != null) for (File x : c) deleteRec(x); }
-        f.delete();
-    }
-    void markDirty() {
-        if (currentFile == null) return;
-        if (!dirtyFiles.contains(currentFile)) {
-            dirtyFiles.add(currentFile);
-            addTab(currentFile);
-        }
-    }
-
-    void addTab(final File file) {
-        if (file != null && !openFiles.contains(file)) openFiles.add(file);
-        tabContainer.removeAllViews();
-        for (final File f : new ArrayList<File>(openFiles)) {
-            final boolean act = f.equals(currentFile);
-            final boolean dir = dirtyFiles.contains(f);
-            LinearLayout tl = new LinearLayout(this);
-            tl.setOrientation(LinearLayout.HORIZONTAL);
-            tl.setBackgroundColor(act ? BG : TAB_INACTIVE);
-            View acc = new View(this);
-            acc.setBackgroundColor(act ? ACCENT : Color.TRANSPARENT);
-            tl.addView(acc, new LinearLayout.LayoutParams(3, LinearLayout.LayoutParams.MATCH_PARENT));
-            TextView name = new TextView(this);
-            name.setText((dir ? "● " : "") + f.getName());
-            name.setTextColor(act ? TEXT_BRIGHT : TEXT_DIM);
-            name.setTextSize(10);
-            name.setPadding(12, 10, 8, 10);
-            final TextView close = new TextView(this);
-            close.setText("✕");
-            close.setTextColor(TEXT_DIM);
-            close.setTextSize(10);
-            close.setPadding(4, 10, 12, 10);
-            name.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) { loadFile(f); }
-            });
-            name.setOnLongClickListener(new View.OnLongClickListener() {
-                @Override public boolean onLongClick(View v) { showTabMenu(f); return true; }
-            });
-            close.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    openFiles.remove(f); dirtyFiles.remove(f);
-                    unsavedChanges.remove(f.getAbsolutePath());
-                    if (f.equals(currentFile)) {
-                        currentFile = null;
-                        codeEditor.setText("");
-                        welcomeScreen.setVisibility(View.VISIBLE);
-                        editorScroll.setVisibility(View.GONE);
-                    }
-                    addTab(null);
-                }
-            });
-            tl.addView(name); tl.addView(close);
-            tabContainer.addView(tl);
-        }
-    }
-
-    void showTabMenu(final File f) {
-        final String[] opts = {"Close","Close Others","Close All"};
-        new AlertDialog.Builder(this).setTitle(f.getName())
-                .setItems(opts, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        if (opts[w].equals("Close")) {
-                            openFiles.remove(f); dirtyFiles.remove(f);
-                            unsavedChanges.remove(f.getAbsolutePath());
-                            if (f.equals(currentFile)) {
-                                currentFile = null; codeEditor.setText("");
-                                welcomeScreen.setVisibility(View.VISIBLE);
-                                editorScroll.setVisibility(View.GONE);
-                            }
-                            addTab(null);
-                        } else if (opts[w].equals("Close Others")) {
-                            ArrayList<File> keep = new ArrayList<File>();
-                            keep.add(f); openFiles = keep;
-                            if (!f.equals(currentFile)) loadFile(f);
-                            addTab(f);
-                        } else {
-                            openFiles.clear(); dirtyFiles.clear(); unsavedChanges.clear();
-                            currentFile = null; codeEditor.setText("");
-                            welcomeScreen.setVisibility(View.VISIBLE);
-                            editorScroll.setVisibility(View.GONE);
-                            addTab(null);
-                        }
-                    }
-                }).show();
-    }
-
-    // ========== PROJECT MGMT ==========
-    void createProject() {
-        final String[] templates = {"📄  Empty Project", "📱  Basic Android App", "🎨  Full-Featured App"};
-        new AlertDialog.Builder(this).setTitle("Choose Template")
-                .setItems(templates, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        showProjectNameDialog(w);
-                    }
-                }).show();
-    }
-
-    void showProjectNameDialog(final int templateId) {
-        final EditText in = new EditText(this);
-        in.setHint("MyAwesomeApp");
-        new AlertDialog.Builder(this).setTitle("Project Name").setView(in)
-                .setPositiveButton("Create", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        String n = in.getText().toString().trim();
-                        if (n.isEmpty()) { toast("Enter a name"); return; }
-                        try {
-                            genProject(n, templateId);
-                            currentProject = new File(projectsDir, n.replaceAll("[^A-Za-z0-9_]", ""));
-                            selectActivity(0);
-                            toast("✓ Project created");
-                        } catch (Exception e) { toast(e.getMessage()); }
-                    }
-                }).setNegativeButton("Cancel", null).show();
-    }
-
-    void showContextMenu(final File f, final boolean isDir) {
-        final String[] opts = isDir
-                ? new String[]{"New File","New Folder","Rename","Delete"}
-                : new String[]{"Open","Info","Duplicate","Rename","Delete"};
-        new AlertDialog.Builder(this).setTitle(f.getName())
-                .setItems(opts, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        String c = opts[w];
-                        if (c.equals("New File")) createNewFile(f);
-                        else if (c.equals("New Folder")) createNewFolder(f);
-                        else if (c.equals("Open")) openFile(f);
-                        else if (c.equals("Info")) showFileInfo(f);
-                        else if (c.equals("Duplicate")) duplicateFile(f);
-                        else if (c.equals("Rename")) renameFile(f);
-                        else if (c.equals("Delete")) deleteFile(f);
-                    }
-                }).show();
-    }
-
-    void showFileInfo(File f) {
-        try {
-            long size = f.length();
-            String content = readFile(f);
-            int lines = content.split("\n").length;
-            int chars = content.length();
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault());
-            String date = sdf.format(new Date(f.lastModified()));
-            String info = "📄  " + f.getName() + "\n\n" +
-                    "📏  Size: " + formatSize(size) + "\n" +
-                    "📝  Lines: " + lines + "\n" +
-                    "🔤  Chars: " + chars + "\n" +
-                    "📅  Modified: " + date + "\n" +
-                    "📁  Path: " + f.getAbsolutePath();
-            new AlertDialog.Builder(this).setTitle("File Info").setMessage(info)
-                    .setPositiveButton("Close", null).show();
-        } catch (Exception e) { toast("Cannot read info"); }
-    }
-
-    String formatSize(long size) {
-        if (size < 1024) return size + " B";
-        if (size < 1024 * 1024) return (size / 1024) + " KB";
-        return (size / (1024 * 1024)) + " MB";
-    }
-
-    void duplicateFile(File f) {
-        try {
-            String content = readFile(f);
-            String name = f.getName();
-            String newName = "copy_" + name;
-            File newFile = new File(f.getParent(), newName);
-            int i = 1;
-            while (newFile.exists()) { newFile = new File(f.getParent(), "copy_" + i + "_" + name); i++; }
-            writeFile(newFile, content);
-            refreshLayout();
-            toast("Duplicated as " + newFile.getName());
-        } catch (Exception e) { toast("Duplicate failed"); }
-    }
-
-    void createNewFile(final File p) {
-        final EditText in = new EditText(this);
-        in.setHint("file.java");
-        new AlertDialog.Builder(this).setTitle("New File").setView(in)
-                .setPositiveButton("Create", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        try { writeFile(new File(p, in.getText().toString()), ""); refreshLayout(); } catch (Exception e) {}
-                    }
-                }).setNegativeButton("Cancel", null).show();
-    }
-    void createNewFolder(final File p) {
-        final EditText in = new EditText(this);
-        in.setHint("folder");
-        new AlertDialog.Builder(this).setTitle("New Folder").setView(in)
-                .setPositiveButton("Create", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        new File(p, in.getText().toString()).mkdirs(); refreshLayout();
-                    }
-                }).setNegativeButton("Cancel", null).show();
-    }
-    void renameFile(final File f) {
-        final EditText in = new EditText(this);
-        in.setText(f.getName());
-        new AlertDialog.Builder(this).setTitle("Rename").setView(in)
-                .setPositiveButton("Rename", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        f.renameTo(new File(f.getParent(), in.getText().toString()));
-                        refreshLayout();
-                    }
-                }).setNegativeButton("Cancel", null).show();
-    }
-    void deleteFile(final File f) {
-        new AlertDialog.Builder(this).setTitle("Delete").setMessage("Delete " + f.getName() + "?")
-                .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        deleteRec(f); refreshLayout();
-                    }
-                }).setNegativeButton("Cancel", null).show();
-    }
-
-    // ========== SYNTAX & CURSOR ==========
-    void updateLineNumbers(String text) {
-        int lines = 1;
-        for (int i = 0; i < text.length(); i++) if (text.charAt(i) == '\n') lines++;
-        StringBuilder sb = new StringBuilder();
-        for (int i = 1; i <= lines; i++) {
-            if (bookmarks.contains(i)) sb.append("🔖");
-            sb.append(i).append("\n");
-        }
-        lineNumbers.setText(sb.toString());
-    }
-
-    void updateCount(String text) {
-        int words = 0, chars = text.length();
-        boolean inWord = false;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (Character.isWhitespace(c)) { inWord = false; }
-            else if (!inWord) { words++; inWord = true; }
-        }
-        statusCount.setText(words + "w " + chars + "c ");
-    }
-
-    void highlight(Editable e) {
-        int cur = codeEditor.getSelectionStart();
-        ForegroundColorSpan[] old = e.getSpans(0, e.length(), ForegroundColorSpan.class);
-        for (ForegroundColorSpan s : old) e.removeSpan(s);
-        BackgroundColorSpan[] oldBg = e.getSpans(0, e.length(), BackgroundColorSpan.class);
-        for (BackgroundColorSpan s : oldBg) e.removeSpan(s);
-        String t = e.toString();
-
-        // Current line highlight
-        int lineStart = t.lastIndexOf('\n', cur - 1) + 1;
-        int lineEnd = t.indexOf('\n', cur);
-        if (lineEnd < 0) lineEnd = t.length();
-        if (lineStart < lineEnd) {
-            e.setSpan(new BackgroundColorSpan(LINE_HL), lineStart, lineEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
-
-        // Bracket matching
-        if (cur > 0 && cur <= t.length()) {
-            char before = cur > 0 ? t.charAt(cur - 1) : 0;
-            char found = 0;
-            int matchIdx = -1;
-            if (before == '{' || before == '}' || before == '(' || before == ')' || before == '[' || before == ']') {
-                found = before;
-                matchIdx = findMatching(t, cur - 1, before);
-            } else if (cur < t.length()) {
-                char at = t.charAt(cur);
-                if (at == '{' || at == '}' || at == '(' || at == ')' || at == '[' || at == ']') {
-                    found = at;
-                    matchIdx = findMatching(t, cur, at);
-                }
-            }
-            if (found != 0 && matchIdx >= 0) {
-                int a = cur - 1, b = matchIdx;
-                if (b < a) { int tmp = a; a = b; b = tmp; }
-                e.setSpan(new BackgroundColorSpan(ACCENT_LIGHT), a, a+1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                e.setSpan(new BackgroundColorSpan(ACCENT_LIGHT), b, b+1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-        }
-
-        Matcher m = Pattern.compile("//.*").matcher(t);
-        while (m.find()) e.setSpan(new ForegroundColorSpan(COMMENT), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        m = Pattern.compile("\"[^\"]*\"").matcher(t);
-        while (m.find()) e.setSpan(new ForegroundColorSpan(ORANGE), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        String[] kw = {"public","private","protected","class","void","int","String","boolean",
-                "if","else","for","while","return","new","import","package","extends",
-                "implements","final","static","abstract","try","catch","throw","throws",
-                "interface","enum","this","super","true","false","null"};
-        for (String k : kw) {
-            m = Pattern.compile("\\b" + k + "\\b").matcher(t);
-            while (m.find()) e.setSpan(new ForegroundColorSpan(BLUE), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        }
-        m = Pattern.compile("<[^>]*>").matcher(t);
-        while (m.find()) e.setSpan(new ForegroundColorSpan(GREEN), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        m = Pattern.compile("\\b\\d+\\b").matcher(t);
-        while (m.find()) e.setSpan(new ForegroundColorSpan(NUMBER_CLR), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        m = Pattern.compile("@\\w+").matcher(t);
-        while (m.find()) e.setSpan(new ForegroundColorSpan(YELLOW), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-
-        codeEditor.setSelection(cur);
-    }
-
-    int findMatching(String t, int pos, char open) {
-        char close = '}';
-        boolean forward = true;
-        if (open == '}') { close = '{'; forward = false; }
-        else if (open == ')') { close = '('; forward = false; }
-        else if (open == ']') { close = '['; forward = false; }
-        else if (open == '(') { close = ')'; }
-        else if (open == '[') { close = ']'; }
-        if (open == '{') close = '}';
-        int depth = 0;
-        if (forward) {
-            for (int i = pos + 1; i < t.length(); i++) {
-                char c = t.charAt(i);
-                if (c == open) depth++;
-                else if (c == close) {
-                    if (depth == 0) return i;
-                    depth--;
-                }
-            }
-        } else {
-            for (int i = pos - 1; i >= 0; i--) {
-                char c = t.charAt(i);
-                if (c == open) depth++;
-                else if (c == close) {
-                    if (depth == 0) return i;
-                    depth--;
-                }
-            }
-        }
-        return -1;
-    }
-
-    void updateLineHighlight() {}
-
-    void updateCursor() {
-        int cur = codeEditor.getSelectionStart();
-        int end = codeEditor.getSelectionEnd();
-        String t = codeEditor.getText().toString();
-        int line = 1, col = 1;
-        for (int i = 0; i < cur && i < t.length(); i++) {
-            if (t.charAt(i) == '\n') { line++; col = 1; } else col++;
-        }
-        int sel = Math.abs(end - cur);
-        String selInfo = sel > 0 ? "  (" + sel + ")" : "";
-        statusRight.setText("Ln " + line + ", Col " + col + selInfo);
-    }
-
-    // ========== FIND & REPLACE ==========
-    void showFindReplace() {
-        LinearLayout ll = new LinearLayout(this);
-        ll.setOrientation(LinearLayout.VERTICAL);
-        ll.setPadding(20, 20, 20, 20);
-        final EditText f = new EditText(this); f.setHint("Find..."); ll.addView(f);
-        final EditText r = new EditText(this); r.setHint("Replace..."); ll.addView(r);
-        new AlertDialog.Builder(this).setTitle("🔍  Find & Replace").setView(ll)
-                .setPositiveButton("Replace All", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        String find = f.getText().toString();
-                        String rep = r.getText().toString();
-                        if (find.isEmpty()) return;
-                        String t = codeEditor.getText().toString();
-                        int c = 0;
-                        while (t.contains(find) && c < 500) {
-                            t = t.replaceFirst(Pattern.quote(find), Matcher.quoteReplacement(rep));
-                            c++;
-                        }
-                        codeEditor.setText(t);
-                        toast("Replaced " + c);
-                    }
-                })
-                .setNeutralButton("Find Next", new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        String find = f.getText().toString();
-                        if (find.isEmpty()) return;
-                        String t = codeEditor.getText().toString();
-                        int cur = codeEditor.getSelectionStart();
-                        int idx = t.indexOf(find, cur);
-                        if (idx == -1) idx = t.indexOf(find);
-                        if (idx >= 0) codeEditor.setSelection(idx, idx + find.length());
-                        else toast("Not found");
-                    }
-                })
-                .setNegativeButton("Cancel", null).show();
-    }
-
-    // ========== THEME, ABOUT, ZEN ==========
-    void toggleZen() {
-        zenMode = !zenMode;
-        activityBar.setVisibility(zenMode ? View.GONE : View.VISIBLE);
-        sidebar.setVisibility(zenMode ? View.GONE : View.VISIBLE);
-        toast(zenMode ? "Zen Mode on" : "Zen Mode off");
-    }
-
-    void showAbout() {
-        new AlertDialog.Builder(this)
-                .setTitle("About Aladdin IDE")
-                .setMessage("⚡ Aladdin IDE v8.0\n\nUltra Edition\n\n" +
-                        "Built on Android with Termux + GitHub Actions\n\n" +
-                        "25 new features:\n" +
-                        "✓ Toggle sidebar (2 taps)\n" +
-                        "✓ Menu with X button\n" +
-                        "✓ Current line highlight\n" +
-                        "✓ Rainbow brackets\n" +
-                        "✓ Toggle comment\n" +
-                        "✓ Duplicate / delete line\n" +
-                        "✓ Move line up/down\n" +
-                        "✓ Indent / outdent\n" +
-                        "✓ Clipboard operations\n" +
-                        "✓ Word / char count\n" +
-                        "✓ File info & size\n" +
-                        "✓ Duplicate file\n" +
-                        "✓ Hidden files toggle\n" +
-                        "✓ Recent projects\n" +
-                        "✓ Project templates\n" +
-                        "✓ XML preview\n" +
-                        "✓ Accent color picker\n" +
-                        "✓ Bookmarks\n" +
-                        "✓ Line ending toggle\n" +
-                        "✓ Selection info\n" +
-                        "✓ Auto-scroll cursor\n" +
-                        "✓ File size + date\n" +
-                        "✓ Search history\n" +
-                        "✓ Floating undo/redo\n" +
-                        "✓ Tooltips everywhere")
-                .setPositiveButton("Close", null).show();
-    }
-
-    void showThemePicker() {
-        final String[] themes = {"dark","dracula","monokai","light"};
-        new AlertDialog.Builder(this).setTitle("Theme")
-                .setItems(themes, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        currentTheme = themes[w];
-                        getSharedPreferences("AladdinPrefs", MODE_PRIVATE).edit()
-                                .putString("theme", currentTheme).apply();
-                        toast("Theme: " + currentTheme + " — restarting");
-                        finish(); startActivity(getIntent());
-                    }
-                }).show();
-    }
-
-    void showAccentPicker() {
-        final String[] colors = {"🔵 Blue", "🟣 Purple", "🟢 Green", "🟠 Orange", "🔴 Red", "🩷 Pink"};
-        new AlertDialog.Builder(this).setTitle("Accent Color")
-                .setItems(colors, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        accentColor = w;
-                        getSharedPreferences("AladdinPrefs", MODE_PRIVATE).edit()
-                                .putInt("accent", accentColor).apply();
-                        toast("Accent set — restarting");
-                        finish(); startActivity(getIntent());
-                    }
-                }).show();
-    }
-
-    // ========== BUILD ENGINE ==========
-    void log(String m) {
-        runOnUiThread(new Runnable() {
-            @Override public void run() { consoleOutput.append(m + "\n"); }
-        });
-    }
-
-    void triggerCloudBuild() {
-        if (githubToken.isEmpty() || githubUser.isEmpty() || githubRepo.isEmpty()) {
-            toast("Set GitHub settings first!"); selectActivity(5); return;
-        }
-        consolePanel.setVisibility(View.VISIBLE);
-        setPanelTab(2);
-        consoleOutput.setText("");
-        log("$ gradle assembleDebug");
-        log("🚀 Initializing cloud build...");
-        log("📦 " + githubUser + "/" + githubRepo);
-        log("─────────────────────────────");
-        new Thread(new Runnable() {
-            @Override public void run() {
-                try {
-                    URL url = new URL("https://api.github.com/repos/" + githubUser + "/" + githubRepo
-                            + "/actions/workflows/build.yml/dispatches");
-                    HttpURLConnection c = (HttpURLConnection) url.openConnection();
-                    c.setRequestMethod("POST");
-                    c.setRequestProperty("Authorization", "token " + githubToken);
-                    c.setRequestProperty("Accept", "application/vnd.github.v3+json");
-                    c.setDoOutput(true);
-                    OutputStream o = c.getOutputStream();
-                    o.write("{\"ref\":\"main\"}".getBytes("UTF-8"));
-                    o.close();
-                    int code = c.getResponseCode();
-                    if (code == 204) {
-                        log("✅ Build triggered");
-                        log("⏳ Waiting...");
-                        Thread.sleep(15000);
-                        checkStatus();
-                    } else log("❌ Failed. Code: " + code);
-                } catch (Exception e) { log("❌ " + e.getMessage()); }
-            }
-        }).start();
-    }
-
-    void checkStatus() {
-        new Thread(new Runnable() {
-            @Override public void run() {
-                try {
-                    boolean done = false; int p = 0;
-                    while (!done && p < 60) {
-                        p++;
-                        URL url = new URL("https://api.github.com/repos/" + githubUser + "/"
-                                + githubRepo + "/actions/runs?per_page=1");
-                        HttpURLConnection c = (HttpURLConnection) url.openConnection();
-                        c.setRequestProperty("Authorization", "token " + githubToken);
-                        c.setRequestProperty("Accept", "application/vnd.github.v3+json");
-                        BufferedReader br = new BufferedReader(new InputStreamReader(c.getInputStream()));
-                        StringBuilder sb = new StringBuilder();
-                        String l;
-                        while ((l = br.readLine()) != null) sb.append(l);
-                        br.close();
-                        JSONObject j = new JSONObject(sb.toString());
-                        JSONArray runs = j.getJSONArray("workflow_runs");
-                        if (runs.length() > 0) {
-                            JSONObject r = runs.getJSONObject(0);
-                            String st = r.getString("status");
-                            String cc = r.optString("conclusion", "pending");
-                            log("  ▸ " + st);
-                            if (st.equals("completed")) {
-                                done = true;
-                                if (cc.equals("success")) {
-                                    log("🎉 BUILD SUCCESSFUL");
-                                    log("📥 Downloading APK...");
-                                    download(r.getLong("id"));
-                                } else log("❌ BUILD FAILED");
-                            }
-                        }
-                        Thread.sleep(10000);
-                    }
-                } catch (Exception e) { log("❌ " + e.getMessage()); }
-            }
-        }).start();
-    }
-
-    void download(long runId) {
-        new Thread(new Runnable() {
-            @Override public void run() {
-                try {
-                    URL url = new URL("https://api.github.com/repos/" + githubUser + "/"
-                            + githubRepo + "/actions/runs/" + runId + "/artifacts");
-                    HttpURLConnection c = (HttpURLConnection) url.openConnection();
-                    c.setRequestProperty("Authorization", "token " + githubToken);
-                    c.setRequestProperty("Accept", "application/vnd.github.v3+json");
-                    BufferedReader br = new BufferedReader(new InputStreamReader(c.getInputStream()));
-                    StringBuilder sb = new StringBuilder();
-                    String l;
-                    while ((l = br.readLine()) != null) sb.append(l);
-                    br.close();
-                    JSONObject j = new JSONObject(sb.toString());
-                    JSONArray ar = j.getJSONArray("artifacts");
-                    if (ar.length() == 0) { log("❌ No artifacts"); return; }
-                    String dl = ar.getJSONObject(0).getString("archive_download_url");
-                    URL du = new URL(dl);
-                    HttpURLConnection dc = (HttpURLConnection) du.openConnection();
-                    dc.setRequestProperty("Authorization", "token " + githubToken);
-                    dc.setInstanceFollowRedirects(true);
-                    InputStream in = dc.getInputStream();
-                    File dir = getExternalFilesDir(null);
-                    if (dir != null && !dir.exists()) dir.mkdirs();
-                    File zip = new File(dir, "AladdinIDE-APK.zip");
-                    FileOutputStream o = new FileOutputStream(zip);
-                    byte[] buf = new byte[8192]; int n;
-                    while ((n = in.read(buf)) != -1) o.write(buf, 0, n);
-                    o.close(); in.close();
-                    log("✅ ZIP downloaded");
-                    File apk = extract(zip, dir);
-                    if (apk == null) { log("❌ Extract failed"); return; }
-                    log("📲 Launching installer...");
-                    install(apk);
-                } catch (Exception e) { log("❌ " + e.getMessage()); }
-            }
-        }).start();
-    }
-
-    File extract(File zip, File out) {
-        try {
-            ZipInputStream z = new ZipInputStream(new FileInputStream(zip));
-            ZipEntry en; File apk = null;
-            while ((en = z.getNextEntry()) != null) {
-                if (en.getName().endsWith(".apk")) {
-                    apk = new File(out, "AladdinIDE-latest.apk");
-                    FileOutputStream fo = new FileOutputStream(apk);
-                    byte[] b = new byte[8192]; int n;
-                    while ((n = z.read(b)) != -1) fo.write(b, 0, n);
-                    fo.close(); break;
-                }
-            }
-            z.close(); return apk;
-        } catch (Exception e) { return null; }
-    }
-
-    void install(final File apk) {
-        runOnUiThread(new Runnable() {
-            @Override public void run() {
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        if (!getPackageManager().canRequestPackageInstalls()) {
-                            log("⚠ Allow install for Aladdin IDE");
-                            Intent i = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
-                            i.setData(Uri.parse("package:" + getPackageName()));
-                            startActivity(i); return;
-                        }
-                    }
-                    Uri uri = FileProvider.getUriForFile(MainActivity.this,
-                            "com.aladdin.ide.fileprovider", apk);
-                    Intent i = new Intent(Intent.ACTION_VIEW);
-                    i.setDataAndType(uri, "application/vnd.android.package-archive");
-                    i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(i);
-                    log("🎊 Installer launched");
-                } catch (Exception e) { log("❌ " + e.getMessage()); }
-            }
-        });
-    }
-
-    // ========== PROJECT GENERATOR ==========
-    void genProject(String name, int templateId) throws Exception {
-        String s = name.replaceAll("[^A-Za-z0-9_]", "");
-        if (s.isEmpty()) s = "MyApp";
-        File proj = new File(projectsDir, s);
-        if (proj.exists()) throw new Exception("Project already exists");
-        File app = new File(proj, "app");
-        File src = new File(app, "src/main/java/com/aladdin/app");
-        File lay = new File(app, "src/main/res/layout");
-        File val = new File(app, "src/main/res/values");
-        src.mkdirs(); lay.mkdirs(); val.mkdirs();
-        writeFile(new File(proj, "settings.gradle"),
-                "pluginManagement {\n    repositories {\n        google()\n        mavenCentral()\n        gradlePluginPortal()\n    }\n}\n"
-                + "dependencyResolutionManagement {\n    repositories {\n        google()\n        mavenCentral()\n    }\n}\n"
-                + "rootProject.name = \"" + s + "\"\ninclude ':app'\n");
-        writeFile(new File(proj, "build.gradle"),
-                "plugins {\n    id 'com.android.application' version '8.2.2' apply false\n}\n");
-        writeFile(new File(app, "build.gradle"),
-                "plugins {\n    id 'com.android.application'\n}\n\nandroid {\n"
-                + "    namespace 'com.aladdin.app'\n    compileSdk 34\n"
-                + "    defaultConfig {\n        applicationId 'com.aladdin.app'\n"
-                + "        minSdk 24\n        targetSdk 34\n        versionCode 1\n        versionName '1.0'\n    }\n}\n");
-        writeFile(new File(app, "src/main/AndroidManifest.xml"),
-                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
-                + "    <application android:label=\"" + s + "\">\n"
-                + "        <activity android:name=\".MainActivity\" android:exported=\"true\">\n"
-                + "            <intent-filter>\n"
-                + "                <action android:name=\"android.intent.action.MAIN\" />\n"
-                + "                <category android:name=\"android.intent.category.LAUNCHER\" />\n"
-                + "            </intent-filter>\n"
-                + "        </activity>\n"
-                + "    </application>\n</manifest>\n");
-        writeFile(new File(src, "MainActivity.java"),
-                "package com.aladdin.app;\n\nimport android.app.Activity;\nimport android.os.Bundle;\n\n"
-                + "public class MainActivity extends Activity {\n"
-                + "    @Override\n    protected void onCreate(Bundle b) {\n"
-                + "        super.onCreate(b);\n        setContentView(R.layout.activity_main);\n    }\n}\n");
-        writeFile(new File(lay, "activity_main.xml"),
-                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                + "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                + "    android:layout_width=\"match_parent\" android:layout_height=\"match_parent\"\n"
-                + "    android:gravity=\"center\" android:orientation=\"vertical\">\n"
-                + "    <TextView android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\"\n"
-                + "        android:text=\"Hello from Aladdin IDE!\" android:textSize=\"24sp\" />\n"
-                + "</LinearLayout>\n");
-        writeFile(new File(val, "strings.xml"),
-                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n"
-                + "    <string name=\"app_name\">" + s + "</string>\n</resources>\n");
-        writeFile(new File(val, "styles.xml"),
-                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n"
-                + "    <style name=\"AppTheme\" parent=\"android:style/Theme.Material.Light.NoActionBar\">\n"
-                + "    </style>\n</resources>\n");
-    }
-
-    void showRecentFiles() {
-        if (recentFiles.isEmpty()) { toast("No recent files"); return; }
-        String[] names = new String[recentFiles.size()];
-        for (int i = 0; i < recentFiles.size(); i++) names[i] = recentFiles.get(i).getName();
-        new AlertDialog.Builder(this).setTitle("Recent Files")
-                .setItems(names, new DialogInterface.OnClickListener() {
-                    @Override public void onClick(DialogInterface d, int w) {
-                        File f = recentFiles.get(w);
-                        if (f.exists()) openFile(f);
-                        else toast("File no longer exists");
-                    }
-                }).show();
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (consolePanel.getVisibility() == View.VISIBLE) consolePanel.setVisibility(View.GONE);
-        else if (sidebarVisible && !zenMode) {
-            sidebarVisible = false;
-            refreshLayout();
-        }
-        else if (currentFile != null && dirtyFiles.contains(currentFile)) {
-            new AlertDialog.Builder(this).setTitle("Unsaved Changes")
-                    .setMessage("Save " + currentFile.getName() + "?")
-                    .setPositiveButton("Save", new DialogInterface.OnClickListener() {
-                        @Override public void onClick(DialogInterface d, int w) { saveCurrentFile(); finish(); }
-                    })
-                    .setNegativeButton("Discard", new DialogInterface.OnClickListener() {
-                        @Override public void onClick(DialogInterface d, int w) { finish(); }
-                    })
-                    .setNeutralButton("Cancel", null).show();
-        } else super.onBackPressed();
-    }
+    public EditorManager getEditorManager() { return editorManager; }
+    public FileManager getFileManager() { return fileManager; }
+    public BuildManager getBuildManager() { return buildManager; }
+    public LinearLayout getSidebarContent() { return sidebarContent; }
+    public LinearLayout getTabContainer() { return tabContainer; }
+    public LinearLayout getConsolePanel() { return consolePanel; }
+    public FrameLayout getMainFrame() { return mainFrame; }
+    public LinearLayout getRightPane() { return rightPane; }
+    public EditText getRightEditor() { return rightEditor; }
+    public android.webkit.WebView getWebPreview() { return webPreview; }
+    public ScrollView getEditorScroll() { return editorScroll; }
+    public TextView getWelcomeScreen() { return welcomeScreen; }
+    public TextView getMinimap() { return minimap; }
+    public TextView getStatusLeft() { return statusLeft; }
+    public TextView getStatusLang() { return statusLang; }
+    public void refreshUILayout() { refreshLayout(); }
+    public void setPanelTabPublic(int i) { setPanelTab(i); }
 }

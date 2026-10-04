@@ -1,6 +1,7 @@
 package com.aladdin.ide;
 
 import android.app.*;
+import android.content.*;
 import android.graphics.*;
 import android.os.*;
 import android.text.*;

@@ -1,6 +1,7 @@
 package com.aladdin.ide;
 
 import android.app.*;
+import android.content.DialogInterface;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.view.*;

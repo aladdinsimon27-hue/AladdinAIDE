@@ -74,7 +74,7 @@ public class AppState {
     }
 
     public static void registerTemplates() {
-        fileTemplates.put(".html", "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>Document</title>\n<link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body>\n\n<h1>Hello World</h1>\n\n<script src=\"script.js\"><\/script>\n</body>\n</html>\n");
+        fileTemplates.put(".html", "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>Document</title>\n<link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body>\n\n<h1>Hello World</h1>\n\n<script src=\"script.js\"></script>\n</body>\n</html>\n");
         fileTemplates.put(".css", "* { margin: 0; padding: 0; box-sizing: border-box; }\nbody { font-family: Arial, sans-serif; background: #f0f0f0; color: #333; }\n");
         fileTemplates.put(".js", "// JavaScript\nconsole.log('Hello, World!');\n");
         fileTemplates.put(".java", "public class Main {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}\n");
